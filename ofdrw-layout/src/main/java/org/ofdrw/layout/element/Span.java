@@ -1,7 +1,9 @@
 package org.ofdrw.layout.element;
 
+import org.ofdrw.core.text.text.Weight;
 import org.ofdrw.font.Font;
 import org.ofdrw.layout.Rectangle;
+import org.ofdrw.layout.element.canvas.NamedColor;
 
 import java.util.LinkedList;
 import java.util.List;
@@ -38,8 +40,17 @@ public class Span implements TextFontInfo {
      * 是否加粗
      * <p>
      * 默认不加粗 false
+     * <p>
+     * 加粗等价于 {@link #setWeight(Weight)} 为 {@link Weight#W_800}
      */
     private boolean bold = false;
+
+    /**
+     * 文字粗细
+     * <p>
+     * 默认 {@link Weight#W_400}
+     */
+    private Weight weight = null;
 
     /**
      * 是否斜体
@@ -54,6 +65,22 @@ public class Span implements TextFontInfo {
      * 默认不含下划线
      */
     private boolean underline = false;
+    /**
+     * 下划线与文字的偏移量
+     */
+    private double underlineOffset = 1.2d;
+    /**
+     * 下划线宽度，0表示保持默认，默认为字体大小的0.05倍
+     */
+    private double underlineWidth = 0d;
+
+
+    /**
+     * 是否填充
+     * <p>
+     * 默认值为：true
+     */
+    private boolean fill = true;
 
     /**
      * 文本内容
@@ -77,7 +104,8 @@ public class Span implements TextFontInfo {
      */
     private Boolean integrity = false;
 
-    private LinkedList<TxtGlyph> txtGlyphsCache = null;
+    LinkedList<TxtGlyph> txtGlyphsCache = null;
+
 
     protected Span() {
         this.setFont(Font.getDefault());
@@ -113,6 +141,20 @@ public class Span implements TextFontInfo {
     }
 
     /**
+     * 设置 文字颜色
+     *
+     * @param color 颜色值，可以是 16进制值 "#FFFFFF"、 16进制值缩写 "#FF"F、RGB "rgb(255,255,255)"、颜色名称 "white"
+     * @return this
+     */
+    public Span setColor(String color) {
+        int[] c = NamedColor.rgb(color);
+        if (c == null || c.length < 3) {
+            throw new IllegalArgumentException("边框颜色 颜色值错误：" + color);
+        }
+       return setColor(c);
+    }
+
+    /**
      * 设置字体颜色
      *
      * @param r 红
@@ -121,7 +163,11 @@ public class Span implements TextFontInfo {
      * @return this
      */
     public Span setColor(int r, int g, int b) {
-        this.fillColor = new int[]{r, g, b};
+        this.fillColor = new int[]{
+                r,
+                g,
+                b
+        };
         return this;
     }
 
@@ -141,6 +187,7 @@ public class Span implements TextFontInfo {
         this.font = font;
         return this;
     }
+
     @Override
     public Double getFontSize() {
         return fontSize;
@@ -165,8 +212,36 @@ public class Span implements TextFontInfo {
         return bold;
     }
 
+    /**
+     * 设置是否加粗
+     * <p>
+     * 若需要更加细致的控制，可以使用 {@link #setWeight(Weight)}
+     *
+     * @param bold 是否加粗
+     * @return this
+     */
     public Span setBold(boolean bold) {
         this.bold = bold;
+        return this;
+    }
+
+    /**
+     * 获取字体粗细
+     *
+     * @return 字体粗细，可能为null。
+     */
+    public Weight getWeight() {
+        return weight;
+    }
+
+    /**
+     * 设置字体粗细
+     *
+     * @param weight 字体粗细
+     * @return this
+     */
+    public Span setWeight(Weight weight) {
+        this.weight = weight;
         return this;
     }
 
@@ -183,8 +258,39 @@ public class Span implements TextFontInfo {
         return underline;
     }
 
+    /**
+     * 设置 下划线
+     *
+     * @param underline 是否启用下划线
+     * @return this
+     */
     public Span setUnderline(boolean underline) {
         this.underline = underline;
+        return this;
+    }
+
+    /**
+     * 设置下划线
+     *
+     * @param underline 是否启用下划线
+     * @param offset    下划线与文字的偏移量，可以为负值，默认值为1.2，单位毫米。
+     * @param width     下划线线宽，默认为0，为0时默认为字体大小的0.05倍。
+     * @return this
+     */
+    public Span setUnderline(boolean underline, double offset, double width) {
+        this.underline = underline;
+        this.underlineOffset = offset;
+        this.underlineWidth = width;
+        return this;
+    }
+
+
+    public Boolean isFill() {
+        return fill;
+    }
+
+    public Span setFill(boolean fill) {
+        this.fill = fill;
         return this;
     }
 
@@ -203,10 +309,16 @@ public class Span implements TextFontInfo {
 
     /**
      * 元素是否可以拆分
+     * <p>
+     * 特殊的：
+     * 如果没有或只有一个文字，那么无论如何设置integrity都为不可拆分
      *
      * @return true 可以拆分；false 不能拆分
      */
     public Boolean isIntegrity() {
+        if (text == null || text.length() <= 1) {
+            integrity = true;
+        }
         return integrity;
     }
 
@@ -214,6 +326,7 @@ public class Span implements TextFontInfo {
         this.integrity = integrity;
         return this;
     }
+
 
     /**
      * 获取字体图形列表
@@ -240,7 +353,7 @@ public class Span implements TextFontInfo {
     public Double[] getDeltaX() {
         List<TxtGlyph> list = glyphList();
         int len = list.size();
-        if (len == 1) {
+        if (len <= 1) {
             // 只有一个字符时，不存在字符偏移所以返还空数组
             return new Double[]{};
         }
@@ -262,7 +375,9 @@ public class Span implements TextFontInfo {
         double height = 0;
         for (TxtGlyph glyph : txtGlyphs) {
             width += glyph.getW();
-            height = glyph.getH();
+            if (glyph.getH() > height) {
+                height = glyph.getH();
+            }
         }
         return new Rectangle(width, height);
     }
@@ -277,15 +392,18 @@ public class Span implements TextFontInfo {
         if (index < 0 || index >= text.length()) {
             throw new IllegalArgumentException("非法的切分数组坐标(index): " + index);
         }
-        Span s1 = this.clone()
-                .setText(this.text.substring(0, index));
-        Span s2 = this.clone()
-                .setText(this.text.substring(index));
-        return new Span[]{s1, s2};
+        Span s1 = this.clone().setText(this.text.substring(0, index));
+        Span s2 = this.clone().setText(this.text.substring(index));
+        return new Span[]{
+                s1,
+                s2
+        };
     }
 
     /**
      * 设置Span为占满剩下行空间的元素
+     * <p>
+     * 等价于在字符串末尾增加\n，当字符串末尾存在\n 时该参数无效。
      *
      * @param linebreak 是否占满剩下行空间 true 标识占满；false标识不占满
      * @return this
@@ -315,19 +433,35 @@ public class Span implements TextFontInfo {
             res.add(this);
         } else {
             String[] split = this.text.split("\n");
-            for (String item : split) {
-                Span lineSpan = this.clone()
-                        .setText(item)
-                        // 设置该元素为占满剩下行空间的Span
-                        .setLinebreak(true);
+            for (int i = 0; i < split.length; i++) {
+                Span lineSpan = this.clone().setText(split[i]);
+                if (i != split.length - 1) {
+                    lineSpan.setLinebreak(true);
+                } else if (this.text.endsWith("\n")) {
+                    lineSpan.setLinebreak(true);
+                }
                 res.add(lineSpan);
-            }
-            if (!this.text.endsWith("\n")) {
-                // 如果最后一个字符不是换行符，那么清除换行标志
-                res.getLast().setLinebreak(false);
             }
         }
         return res;
+    }
+
+    /**
+     * 获取下划线与文字的偏移量
+     *
+     * @return 下划线与文字的偏移量，单位毫米
+     */
+    public double getUnderlineOffset() {
+        return underlineOffset;
+    }
+
+    /**
+     * 获取下划线宽度
+     *
+     * @return 下划线宽度, 0表示保持默认，默认为字体大小的0.05倍，单位毫米
+     */
+    public double getUnderlineWidth() {
+        return underlineWidth;
     }
 
     @Override
@@ -337,10 +471,15 @@ public class Span implements TextFontInfo {
         span.fontSize = fontSize;
         span.letterSpacing = letterSpacing;
         span.bold = bold;
+        span.weight = weight;
         span.italic = italic;
         span.underline = underline;
-        span.text = new String(text);
+        span.underlineOffset = underlineOffset;
+        span.underlineWidth = underlineWidth;
+        span.fill = fill;
+        span.text = text;
         span.integrity = integrity;
+        span.linebreak = linebreak;
         span.fillColor = fillColor == null ? null : fillColor.clone();
         return span;
     }

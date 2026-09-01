@@ -14,10 +14,12 @@ import java.security.*;
 
 /**
  * 国密SM2withSM3数字签名实现容器
+ * @deprecated OFD的数字签名应符合 《GB/T 35275》  {@link GBT35275DSContainer}
  *
  * @author 权观宇
  * @since 2020-04-20 12:26:33
  */
+@Deprecated
 public class DigitalSignContainer implements ExtendSignatureContainer {
 
     /**

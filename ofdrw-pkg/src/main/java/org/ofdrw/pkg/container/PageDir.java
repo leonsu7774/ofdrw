@@ -2,13 +2,20 @@ package org.ofdrw.pkg.container;
 
 import org.dom4j.DocumentException;
 import org.dom4j.Element;
+import org.ofdrw.core.Holder;
 import org.ofdrw.core.annotation.pageannot.PageAnnot;
 import org.ofdrw.core.basicStructure.pageObj.Page;
 import org.ofdrw.core.basicStructure.res.Res;
+import org.ofdrw.core.basicType.ST_Loc;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 /**
  * 页面目录容器
@@ -17,6 +24,8 @@ import java.nio.file.Path;
  * @since 2020-01-18 03:05:23
  */
 public class PageDir extends VirtualContainer {
+
+    public static final Pattern AnnotFileRegex = Pattern.compile("Annot_(\\d+).xml");
 
     /**
      * 页面容器名称前缀
@@ -38,24 +47,39 @@ public class PageDir extends VirtualContainer {
      */
     public static final String AnnotationFileName = "Annotation.xml";
 
+    /**
+     * 注释文件前缀
+     * <p>
+     * GMT0099 OFD 2.0
+     */
+    public static final String AnnotFilePrefix = "Annot_";
+
 
     /**
-     * 代表OFD中第几页
+     * 代表OFD  页面索引号
      * <p>
      * index 从 0 开始取
      */
-    private int index = 0;
+    private String index = "0";
+
+
+    /**
+     * 最大注释文件对象索引
+     * <p>
+     * 在向Page_N中加入注释时使用
+     */
+    private Integer maxAnnotIndex = -1;
 
 
     public PageDir(Path fullDir) throws IllegalArgumentException {
         super(fullDir);
-        String indexStr = this.getContainerName().replace(PageContainerPrefix, "");
-        try {
-            this.index = Integer.parseInt(indexStr);
-        } catch (NumberFormatException e) {
-            clean();
-            throw new IllegalArgumentException("不合法的文件目录名称：" + this.getContainerName() + "，目录名称应为 Page_N");
-        }
+        this.index = this.getContainerName().replace(PageContainerPrefix, "");
+//        try {
+//            this.index = Integer.parseInt(indexStr);
+//        } catch (NumberFormatException e) {
+//            clean();
+//            throw new IllegalArgumentException("不合法的文件目录名称：" + this.getContainerName() + "，目录名称应为 Page_N");
+//        }
     }
 
 
@@ -63,8 +87,18 @@ public class PageDir extends VirtualContainer {
      * 获取页面索引
      *
      * @return 页面索引
+     * @throws NumberFormatException 非规范的页面索引可能导致该问题
      */
     public Integer getIndex() {
+        return Integer.parseInt(index);
+    }
+
+    /**
+     * 获取页面索引字符串，默认为数字如 "1"，非规范情况下将返回自定义名称
+     *
+     * @return 页面索引字符串，默认为数字如 "1"，非规范情况下将返回自定义名称
+     */
+    public String getIndexStr() {
         return index;
     }
 
@@ -101,6 +135,44 @@ public class PageDir extends VirtualContainer {
     public PageAnnot getPageAnnot() throws FileNotFoundException, DocumentException {
         Element obj = this.getObj(AnnotationFileName);
         return new PageAnnot(obj);
+    }
+
+    /**
+     * 根据页面注释文件的名称前缀获取该目录下所有注释对象
+     * <p>
+     * 注释文件前缀： Annot_M.xml
+     * <p>
+     * Key: 文件名
+     * Value: 注释对象
+     *
+     * @return 容器内所有注释对象
+     * @throws IOException 文件读异常
+     */
+    public Map<String, PageAnnot> getPageAnnots() throws IOException {
+        Map<String, PageAnnot> res = new HashMap<>();
+        // 过滤出注释文件
+        try (Stream<Path> stream = Files.list(this.getContainerPath())) {
+            stream.filter((item) -> {
+                String fileName = item.getFileName().toString().toLowerCase();
+                // 不是目录 并且 文件名以 Annot_ 开头
+                return Files.isRegularFile(item)
+                        && fileName.startsWith(AnnotFilePrefix.toLowerCase())
+                        && fileName.endsWith(".xml");
+            }).forEach(item -> {
+                Element obj = null;
+                try {
+                    obj = this.getObj(AnnotationFileName);
+                } catch (Exception e) {
+                    // ignore
+                    obj = null;
+                }
+                if (obj != null) {
+                    res.put(item.getFileName().toString(), new PageAnnot(obj));
+                }
+            });
+        }
+
+        return res;
     }
 
     /**
@@ -146,6 +218,67 @@ public class PageDir extends VirtualContainer {
         // 如果存在那么获取容器，不存在则创建容器
         obtainRes().add(resource);
         return this;
+    }
+
+    /**
+     * 向页面加入新的注释文件
+     *
+     * @param pageAnnot 注释对象
+     * @return 注释文件容器内绝对路径
+     * @throws IOException 文件复制过程中发生异常
+     */
+    public ST_Loc addAnnot(PageAnnot pageAnnot) throws IOException {
+        if (pageAnnot == null) {
+            return null;
+        }
+        // 获取当前目录中最大的注释文件索引号，然后+1 作为新的文件索引
+        maxAnnotIndex = getMaxAnnotFileIndex() + 1;
+        String fileName = AnnotFilePrefix + maxAnnotIndex + ".xml";
+        return addAnnot(fileName, pageAnnot);
+    }
+
+    /**
+     * 向页面内添加注释文件
+     *
+     * @param fileName  文件名称
+     * @param pageAnnot 注释
+     * @return 注释文件容器内绝对路径
+     */
+    public ST_Loc addAnnot(String fileName, PageAnnot pageAnnot) {
+        this.putObj(fileName, pageAnnot);
+        return this.getAbsLoc().cat(fileName);
+    }
+
+    /**
+     * 获取当Page_N容器中最大的注释文件索引号
+     *
+     * @return 索引数字
+     * @throws IOException 文件读取异常
+     */
+    public Integer getMaxAnnotFileIndex() throws IOException {
+        if (maxAnnotIndex < 0) {
+            Holder<Integer> maxIndexHolder = new Holder<>(-1);
+            try (Stream<Path> stream = Files.list(this.getContainerPath())) {
+                stream.forEach((item) -> {
+                    String fileName = item.getFileName().toString().toLowerCase();
+                    // 不是目录 并且 文件名以 Annot_ 开头
+                    if (fileName.startsWith(AnnotFilePrefix.toLowerCase())) {
+                        String numStr = fileName.replace(AnnotFilePrefix.toLowerCase(), "")
+                                .split("\\.")[0];
+                        try {
+                            int n = Integer.parseInt(numStr);
+                            if (n > maxIndexHolder.value) {
+                                maxIndexHolder.value = n;
+                            }
+                        } catch (NumberFormatException e) {
+                            // ignore
+                        }
+                    }
+                });
+            }
+            maxAnnotIndex = maxIndexHolder.value;
+        }
+        return maxAnnotIndex;
     }
 
     /**

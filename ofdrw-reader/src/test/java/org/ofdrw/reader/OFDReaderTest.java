@@ -8,14 +8,23 @@ import org.ofdrw.core.basicStructure.ofd.DocBody;
 import org.ofdrw.core.basicStructure.ofd.OFD;
 import org.ofdrw.core.basicStructure.ofd.docInfo.CT_DocInfo;
 import org.ofdrw.core.basicStructure.pageObj.Page;
+import org.ofdrw.core.basicType.ST_Box;
 import org.ofdrw.pkg.container.DocDir;
 import org.ofdrw.pkg.container.OFDDir;
+import org.ofdrw.pkg.container.ResDir;
+import org.ofdrw.pkg.container.VirtualContainer;
+import org.ofdrw.reader.model.StampAnnotEntity;
 
+import java.io.ByteArrayInputStream;
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDate;
+import java.util.List;
+
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -27,8 +36,28 @@ class OFDReaderTest {
 
     private Path src = Paths.get("src/test/resources/helloworld.ofd");
 
+    @Test
+    void testChineseDirName() throws IOException {
+        Path src = Paths.get("src/test/resources/chineseDir.ofd");
+        try (OFDReader reader = new OFDReader(src);) {
+            System.out.println(reader.getWorkDir().toAbsolutePath());
+            OFDDir ofdDir = reader.getOFDDir();
+            DocDir docDir = ofdDir.obtainDocDefault();
+            ResDir res = docDir.getRes();
+            VirtualContainer chineseDirName = res.getContainer("这是一个中文目录", VirtualContainer::new);
+            assertNotNull(chineseDirName);
+
+            Path file = chineseDirName.getFile("数据文件.txt");
+            byte[] contentBin = Files.readAllBytes(file);
+            final String content = new String(contentBin);
+            System.out.println(content);
+            assertEquals("文件中有一些中文", content);
+        }
+    }
+
     /**
      * 获取附件对象
+     *
      * @throws IOException
      */
     @Test
@@ -42,7 +71,7 @@ class OFDReaderTest {
             Path file = reader.getAttachmentFile("AAABBB");
             Assertions.assertNull(file);
 
-             file = reader.getAttachmentFile("Gao");
+            file = reader.getAttachmentFile("Gao");
             Assertions.assertTrue(Files.exists(file));
 
         }
@@ -53,7 +82,7 @@ class OFDReaderTest {
     @Test
     void oFDReader() throws IOException {
         assertThrows(IllegalArgumentException.class, () -> {
-            OFDReader reader = new OFDReader(null);
+            OFDReader reader = new OFDReader(Paths.get("target/null.ofd"));
         });
         OFDReader reader = new OFDReader(src);
         Path workDir = reader.getWorkDir();
@@ -77,7 +106,7 @@ class OFDReaderTest {
             OFDDir ofdDir = reader.getOFDDir();
             OFD ofd = ofdDir.getOfd();
             String docID = ofd.getDocBody().getDocInfo().getDocID();
-            assertEquals("6b9c7c83cff048e7b427ef0567f3e065", docID);
+            assertEquals("220c5913ebfe4f6e8070dabd3647f157", docID);
         }
     }
 
@@ -89,6 +118,26 @@ class OFDReaderTest {
             Page page = reader.getPage(1);
             assertEquals(1, page.getContent().getLayers().size());
         }
+    }
+
+
+    @Test
+    public void testReader() throws Exception {
+        Path src = Paths.get("src/test/resources/helloworld.ofd");
+        byte[] ofdSrc = Files.readAllBytes(src);
+        Path fileTemp = Files.createTempDirectory("ofd_tmp");
+
+        String tempDirBuilder = fileTemp.toFile().getAbsolutePath() +
+                File.separator +
+                fileTemp.toFile().getName() +
+                "_src.OFD";
+        Path srcPath = Paths.get(tempDirBuilder);
+        Files.write(srcPath, ofdSrc);
+        OFDReader reader = new OFDReader(srcPath);
+        //reader.close();
+
+        Files.delete(srcPath);
+        Files.delete(fileTemp);
     }
 
 
@@ -124,6 +173,25 @@ class OFDReaderTest {
             CT_DocInfo docInfo = docBody.getDocInfo();
             assertEquals(docInfo.getTile(), "Hello World");
             assertEquals(docInfo.getAuthor(), "权观宇");
+        }
+    }
+
+    @Test
+    void getStampAnnots() throws IOException {
+        Path path = Paths.get("src/test/resources/SESV4SignDoc.ofd");
+        try (OFDReader ofdReader = new OFDReader(path)) {
+            final List<StampAnnotEntity> stampAnnots = ofdReader.getStampAnnots();
+            assertEquals(1, stampAnnots.size());
+        }
+    }
+
+
+    @Test
+    void getPageSize() throws Exception {
+        Path path = Paths.get("src/test/resources/SESV4SignDoc.ofd");
+        try (OFDReader reader = new OFDReader(path)) {
+            final ST_Box pageSize = reader.getPageSize(1);
+            assertEquals(new ST_Box(0,0,210,297).toString(), pageSize.toString());
         }
     }
 }

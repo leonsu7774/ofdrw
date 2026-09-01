@@ -1,18 +1,22 @@
 package org.ofdrw.pkg.container;
 
 import org.apache.commons.io.FileUtils;
+import org.bouncycastle.jcajce.provider.digest.SM3;
 import org.dom4j.DocumentException;
 import org.dom4j.Element;
 import org.ofdrw.core.DefaultElementProxy;
 import org.ofdrw.core.basicType.ST_Loc;
 import org.ofdrw.pkg.tool.ElemCup;
 
-import java.io.Closeable;
-import java.io.FileNotFoundException;
-import java.io.IOException;
+import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
+import java.security.MessageDigest;
+import java.text.SimpleDateFormat;
+import java.util.Arrays;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Function;
@@ -45,11 +49,20 @@ public class VirtualContainer implements Closeable {
      */
     private Map<String, Element> fileCache;
 
+    /**
+     * 用于保存读取到的文件的Hash
+     * 因为读取操作导致文档加载到缓存，
+     * 但是文件在flush时候，反序列丢失格式字符等
+     * 导致文件改动。
+     */
+    private Map<String, byte[]> fileSrcHash;
+    private MessageDigest digest;
 
     /**
      * 目录中的虚拟容器缓存
      */
     private Map<String, VirtualContainer> dirCache;
+
 
     /**
      * 获取虚拟容器的名称
@@ -63,6 +76,8 @@ public class VirtualContainer implements Closeable {
     private VirtualContainer() {
         fileCache = new HashMap<>(7);
         dirCache = new HashMap<>(5);
+        fileSrcHash = new HashMap<>(7);
+        digest = null;
         this.parent = this;
     }
 
@@ -135,19 +150,67 @@ public class VirtualContainer implements Closeable {
      * @throws IOException IO异常
      */
     public VirtualContainer putFile(Path file) throws IOException {
+        putFileWithPath(file);
+        return this;
+    }
+
+    /**
+     * 向虚拟容器中加入文件，并获取文件在容器中的绝对路径
+     *
+     * @param file 文件路径对象
+     * @return null 或 文件在容器中的绝对路径
+     * @throws IOException IO异常
+     */
+    public Path putFileWithPath(Path file) throws IOException {
         if (file == null || Files.notExists(file) || Files.isDirectory(file)) {
             // 为空或是一个文件夹，或者不存在
-            return this;
+            return null;
         }
         String fileName = file.getFileName().toString();
         Path target = Paths.get(fullPath, fileName);
         // 如果文件已经在目录中那么不做任何事情
-        if (target.toAbsolutePath().toString()
+        if (Files.exists(target) || target.toAbsolutePath().toString()
                 .equals(file.toAbsolutePath().toString())) {
-            return this;
+            if (FileUtils.contentEquals(target.toFile(), file.toFile())) {
+                // 两个文件一致，那么不做任何改变，返回已经存在的文件路径
+                return target;
+            } else {
+                // 修改更名文件名称，添加前缀时间防止冲突
+                String prefix = new SimpleDateFormat("yyyyMMddHHmmss_").format(new Date());
+                target = Paths.get(fullPath, prefix + fileName);
+            }
         }
         // 复制文件到指定目录
         Files.copy(file, target);
+        return target;
+    }
+
+    /**
+     * 向虚拟容器中直接加入流类型资源
+     * <p>
+     * 根据提供文件名称创建文件
+     * <p>
+     * 输入流内容将直接写入文件内，不做检查
+     * <p>
+     * 若文件已经存在，那么将会覆盖原文件！
+     *
+     * @param fileName 文件名称
+     * @param in       输入流，流的关闭应由调用者负责
+     * @return this
+     * @throws IOException 文件复制异常
+     */
+    public VirtualContainer addRaw(String fileName, InputStream in) throws IOException {
+        Path target = Paths.get(fullPath, fileName);
+        byte[] buffer = new byte[4096];
+        int n = 0;
+        try (final OutputStream out = Files.newOutputStream(
+                target,
+                StandardOpenOption.CREATE,
+                StandardOpenOption.TRUNCATE_EXISTING)) {
+            while ((n = in.read(buffer)) != -1) {
+                out.write(buffer, 0, n);
+            }
+        }
         return this;
     }
 
@@ -174,6 +237,141 @@ public class VirtualContainer implements Closeable {
     }
 
     /**
+     * 通过路径获取元素
+     * <p>
+     * 例如：
+     * <p>
+     * 当前 <pre>/Doc_0/Pages，获取 /Doc_0/Pages/Page_0/Content.xml 结果 Page Element</pre>
+     * <p>
+     * 当前 <pre>/Doc_0/Tpl 结果 获取 /Doc_0/Pages/Page_0/Content.xml 结果 null</pre>
+     * <p>
+     * 当前 <pre>/Doc_0/Pages 结果 获取 Page_0/Content.xml 结果 Page Element</pre>
+     *
+     * @param loc 元素所在路径，支持相对路径，若是绝对路径且不在当前容器中，那么返回null
+     * @return 元素对象，不存在返回null
+     * @throws DocumentException 元素序列化异常
+     */
+    public Element getObj(ST_Loc loc) throws DocumentException {
+        if (loc == null || loc.isEmpty()) {
+            return null;
+        }
+        String[] dst = loc.parts();
+        // 判断是否是跟元素并且具有相同的前缀
+        if (loc.isRootPath()) {
+            String[] current = getAbsLoc().parts();
+            // 检查 dst 是否包含全部 current每个元素
+            for (int i = 0; i < current.length; i++) {
+                if (current[i].equals(dst[i]) == false) {
+                    // 处于不同前缀中
+                    return null;
+                }
+            }
+            // 转换为相对路径
+            String[] relative = new String[dst.length - current.length];
+            for (int i = current.length; i < dst.length; i++) {
+                relative[i - current.length] = dst[i];
+            }
+            dst = relative;
+        }
+        // 通过相对路径获取元素
+        return getObj(dst);
+    }
+
+    /**
+     * 通过路径获取元素
+     *
+     * @param relativeDst 相对路径，["a","b", "content.xml"]
+     * @return 元素对象，若文件路径不存在则返回null
+     * @throws DocumentException 文件解析异常
+     */
+    private Element getObj(String[] relativeDst) throws DocumentException {
+        if (relativeDst == null || relativeDst.length == 0) {
+            return null;
+        }
+        if (relativeDst.length == 1) {
+            // 只有一个元素且为空无法找到
+            if (relativeDst[0].isEmpty()) {
+                return null;
+            }
+            // 只有一个元素，则从缓存中获取
+            try {
+                return getObj(relativeDst[0]);
+            } catch (FileNotFoundException e) {
+                // 找不到文件
+                return null;
+            }
+        }
+
+        try {
+            VirtualContainer child = getContainer(relativeDst[0], VirtualContainer::new);
+            // 移除子元素
+            String[] sub = Arrays.copyOfRange(relativeDst, 1, relativeDst.length);
+            // 递归获取
+            return child.getObj(sub);
+        } catch (FileNotFoundException e) {
+            return null;
+        }
+    }
+
+    /**
+     * 通过路径获取文件
+     * <p>
+     * 注意在文档尚未关闭之前，获取的元素对象是缓存的，此时若获取文件将会出现 FileNotFoundException。
+     * <p>
+     * 获取获取时若使用绝对路径，与当前目录没有相同的前缀则返回null。
+     * <p>
+     * 例如：
+     * <p>
+     * 当前 <pre>/Doc_0/Pages，获取 /Doc_0/Pages/Page_0/Content.xml 结果 Content.xml</pre>
+     * <p>
+     * 当前 <pre>/Doc_0/Pages，获取 /Doc_0/Pages/Page_0/Content.xml 结果 null</pre>
+     * <p>
+     * 当前 <pre>/Doc_0/Pages，获取 Page_0/Content.xml 结果 Content.xml</pre>
+     *
+     * @param loc 文件路径，可以是相对路径，也可以是绝对路径。
+     * @return 文件路径 或 文件不存在返回null。
+     */
+    public Path getFile(ST_Loc loc) {
+        if (loc == null) {
+            return null;
+        }
+        // 空表示获取但前容器路径
+        if (loc.isEmpty()) {
+            return getContainerPath();
+        }
+        String[] dst = loc.parts();
+        boolean isRoot = loc.isRootPath();
+
+        // 若是根路径，则判断是否具有相同前缀，然后转换为相对路径
+        if (isRoot) {
+            String[] current = getAbsLoc().parts();
+            // 检查 dst 是否包含全部 current每个元素
+            for (int i = 0; i < current.length; i++) {
+                if (current[i].equals(dst[i]) == false) {
+                    // 处于不同前缀中
+                    return null;
+                }
+            }
+            // 转换为相对路径
+            String[] relative = new String[dst.length - current.length];
+            for (int i = current.length; i < dst.length; i++) {
+                relative[i - current.length] = dst[i];
+            }
+            dst = relative;
+        }
+        // 相对路径为空表示获取当前容器路径
+        if (dst.length == 0) {
+            return getContainerPath();
+        }
+        // 在相同目录中则组装
+        Path res = Paths.get(fullPath, dst);
+        if (Files.notExists(res)) {
+            return null;
+        }
+        return res;
+    }
+
+    /**
      * 通过文件名获取元素对象
      *
      * @param fileName 文件名
@@ -191,10 +389,56 @@ public class VirtualContainer implements Closeable {
             Path file = getFile(fileName);
             // 反序列化文件为对象
             element = ElemCup.inject(file);
+            // 计算并存储刚读取到对象序列化后的Hash
+            fileSrcHash.put(fileName, objectHash(element));
             // 从文件加载元素，那么缓存该元素对象
             fileCache.put(fileName, element);
         }
         return element;
+    }
+
+    /**
+     * 计算获取的对象的序列化Hash值
+     *
+     * @param element 文档对象
+     * @return Hash
+     * @throws DocumentException 文档读取和计算过程中异常
+     */
+    private byte[] objectHash(Element element) throws DocumentException {
+        try {
+            if (digest == null) {
+                digest = new SM3.Digest();
+            }
+            byte[] bin = ElemCup.dump(element);
+            digest.reset();
+            digest.update(bin);
+            return digest.digest();
+        } catch (IOException e) {
+            throw new DocumentException("文档计算摘要过程中异常", e);
+        }
+    }
+
+    /**
+     * 判断文件是否改动
+     *
+     * @param filename 文件名
+     * @param element  文件对象
+     * @return true - 已经被改动;false - 未改动
+     */
+    private boolean fileChanged(String filename, Element element) {
+        if (digest == null) {
+            return true;
+        }
+        byte[] srcHash = fileSrcHash.get(filename);
+        if (srcHash == null) {
+            return true;
+        }
+        try {
+            byte[] nowHash = objectHash(element);
+            return !Arrays.equals(srcHash, nowHash);
+        } catch (DocumentException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     /**
@@ -228,6 +472,7 @@ public class VirtualContainer implements Closeable {
      * @param <R>    容器子类
      * @return 新建或已经存在的容器
      */
+    @SuppressWarnings("unchecked")
     public <R extends VirtualContainer> R obtainContainer(String name, Function<Path, R> mapper) {
         if (name == null || name.length() == 0) {
             throw new IllegalArgumentException("容器名称（name）为空");
@@ -311,12 +556,24 @@ public class VirtualContainer implements Closeable {
     }
 
     /**
+     * 判断文件或对象是否存在（错误的函数名称）
+     *
+     * @param fileName 文件名称
+     * @return true - 存在;false - 不存在
+     * @deprecated {@link #exist(String)}
+     */
+    @Deprecated
+    public boolean exit(String fileName) {
+        return exist(fileName);
+    }
+
+    /**
      * 判断文件或对象是否存在
      *
      * @param fileName 文件名称
      * @return true - 存在;false - 不存在
      */
-    public boolean exit(String fileName) {
+    public boolean exist(String fileName) {
         if (fileName == null || fileName.length() == 0) {
             return false;
         }
@@ -324,13 +581,30 @@ public class VirtualContainer implements Closeable {
         if (element == null) {
             // 缓存中不存在，从文件目录中尝试读取
             Path res = Paths.get(fullPath, fileName);
-            if (Files.isDirectory(res) || Files.notExists(res)) {
-                return false;
-            } else {
-                return true;
-            }
+            return !Files.isDirectory(res) && !Files.notExists(res);
         } else {
             return true;
+        }
+    }
+
+    /**
+     * 删除文件
+     * <p>
+     * 注意该方法只能删除当前容器中的文件，不能删除子容器中的文件。
+     *
+     * @param fileName 文件名称
+     * @throws IOException 文件删除异常
+     */
+    public void deleteFile(String fileName) throws IOException {
+        if (fileName == null || fileName.length() == 0) {
+            return;
+        }
+        fileCache.remove(fileName);
+        Path res = Paths.get(fullPath, fileName);
+        // 检查是否具有相同前缀，防止路径攻击
+        if (res.toAbsolutePath().toString().startsWith(fullPath)) {
+            // 删除文件
+            Files.delete(res);
         }
     }
 
@@ -360,9 +634,14 @@ public class VirtualContainer implements Closeable {
     public void flush() throws IOException {
         // 刷新元素对象到指定目录
         for (Map.Entry<String, Element> kv : fileCache.entrySet()) {
-            Path filePath = Paths.get(fullPath, kv.getKey());
+            String filename = kv.getKey();
+            Path filePath = Paths.get(fullPath, filename);
+            Element element = kv.getValue();
             // 序列化为文件
-            ElemCup.dump(kv.getValue(), filePath);
+            // 检查文件是否被修改，只有被修改的文件才能够非flush
+            if (fileChanged(filename, element)) {
+                ElemCup.dumpUpNS(element, filePath);
+            }
         }
         // 递归的刷新容器中包含的其他容器
         for (VirtualContainer container : dirCache.values()) {
@@ -404,7 +683,10 @@ public class VirtualContainer implements Closeable {
         Element element = fileCache.get(name);
         if (element != null) {
             Path filePath = Paths.get(fullPath, name);
-            ElemCup.dump(element, filePath);
+            // 检查文件是否被修改，只有被修改的文件才能够非flush
+            if (fileChanged(name, element)) {
+                ElemCup.dumpUpNS(element, filePath);
+            }
         }
         return this;
     }
@@ -424,9 +706,53 @@ public class VirtualContainer implements Closeable {
         return absRes;
     }
 
+    /**
+     * 向虚拟容器中加入文件
+     *
+     * @param fileName 文件名称
+     * @param in      输入流，流的关闭应由调用者负责
+     * @throws IOException 文件复制异常
+     */
+    public void putFile(String fileName, InputStream in) throws IOException {
+        Path target = Paths.get(fullPath, fileName);
+        byte[] buffer = new byte[4096];
+        int n = 0;
+        try (OutputStream out = Files.newOutputStream(
+                target,
+                StandardOpenOption.CREATE,
+                StandardOpenOption.TRUNCATE_EXISTING)) {
+            while ((n = in.read(buffer)) != -1) {
+                out.write(buffer, 0, n);
+            }
+        }
+    }
+
+    /**
+     * 向虚拟容器中加入文件
+     * @param fileName 文件名称
+     * @param data    数据内容
+     * @throws IOException 文件写入异常
+     */
+    public void putFile(String fileName, byte[] data) throws IOException {
+        if (data == null || data.length == 0) {
+            data = new byte[0];
+        }
+        Path target = Paths.get(fullPath, fileName);
+        try (OutputStream out = Files.newOutputStream(
+                target,
+                StandardOpenOption.CREATE,
+                StandardOpenOption.TRUNCATE_EXISTING)) {
+            out.write(data);
+        }
+    }
+
+
+
     @Override
     public void close() throws IOException {
         // 删除工作过程中存放于虚拟容器中的文件和目录
         flush();
     }
+
+
 }

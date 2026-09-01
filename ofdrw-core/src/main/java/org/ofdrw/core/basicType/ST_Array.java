@@ -16,7 +16,7 @@ import java.util.List;
  * @author 权观宇
  * @since 2019-09-28 10:40:37
  */
-public class ST_Array extends STBase implements Cloneable{
+public class ST_Array extends STBase implements Cloneable {
 
     /**
      * 元素收容
@@ -44,6 +44,7 @@ public class ST_Array extends STBase implements Cloneable{
     /**
      * 矩阵相乘
      *
+     * @param array 矩阵数组
      * @return 相乘后的结果矩阵
      */
     public ST_Array mtxMul(ST_Array array) {
@@ -74,14 +75,14 @@ public class ST_Array extends STBase implements Cloneable{
     /**
      * 获取 ST_Array 实例如果参数非法则返还null
      *
-     * @param arrStr 数字字符串
+     * @param arrStr 数字字符串或者字符串null
      * @return 实例 或 null
      */
     public static ST_Array getInstance(String arrStr) {
-        if (arrStr == null || arrStr.trim().length() == 0) {
+        if (arrStr == null || "null".equals(arrStr) || arrStr.trim().length() == 0) {
             return null;
         }
-        return new ST_Array(arrStr.trim().split(" "));
+        return new ST_Array(arrStr.trim().split("\\s+"));
     }
 
     public ST_Array(Serializable... arr) {
@@ -93,12 +94,12 @@ public class ST_Array extends STBase implements Cloneable{
         array = new ArrayList<>(arr.length);
 
         for (Serializable item : arr) {
-            if (item instanceof String || item == null) {
+            if (item == null) {
+                continue;
+            } else if (item instanceof String) {
                 String str = (String) item;
-                if (item == null || str.trim().length() == 0) {
+                if (str.trim().length() == 0) {
                     continue;
-                } else {
-                    item = str;
                 }
             } else if (item instanceof Double) {
                 item = STBase.fmt((Double) item);
@@ -107,6 +108,26 @@ public class ST_Array extends STBase implements Cloneable{
             }
             array.add(item.toString());
         }
+    }
+
+    /**
+     * 创建变换矩阵
+     *
+     * @param a X轴缩放倍数
+     * @param b Y轴斜切系数
+     * @param c X轴斜切系数
+     * @param d Y轴缩放倍数
+     * @param e X偏移量（距原点）
+     * @param f Y偏移量（距原点）
+     */
+    public ST_Array(double a, double b, double c, double d, double e, double f) {
+        array = new ArrayList<>(6);
+        array.add(Double.toString(a));
+        array.add(Double.toString(b));
+        array.add(Double.toString(c));
+        array.add(Double.toString(d));
+        array.add(Double.toString(e));
+        array.add(Double.toString(f));
     }
 
 
@@ -120,13 +141,33 @@ public class ST_Array extends STBase implements Cloneable{
     }
 
     /**
+     * 获取期待长度的字符串数组
+     * <p>
+     * 长度不足将会自动填充空白字符，长度不足则截取
+     *
+     * @param expectCount 期待长度
+     * @return 字符串数组
+     */
+    public String[] expectStrArr(int expectCount) {
+        String[] res = new String[expectCount];
+        for (int i = 0; i < expectCount; i++) {
+            if (i < array.size()) {
+                res[i] = (array.get(i));
+            } else {
+                res[i] = "";
+            }
+        }
+        return res;
+    }
+
+    /**
      * 获取浮点数组
      *
      * @return 浮点数组
      */
     public Double[] toDouble() {
         return this.array.stream()
-                .map(Double::parseDouble)
+                .map(STBase::toDouble)
                 .toArray(Double[]::new);
     }
 
@@ -137,7 +178,7 @@ public class ST_Array extends STBase implements Cloneable{
      */
     public Integer[] toInt() {
         return this.array.stream()
-                .map(Integer::parseInt)
+                .map(STBase::toInt)
                 .toArray(Integer[]::new);
     }
 
@@ -182,18 +223,98 @@ public class ST_Array extends STBase implements Cloneable{
         return mtx;
     }
 
-    public void printMtx(){
+    public void printMtx() {
         double[][] m = toMtx();
-        for (int i = 0; i < m.length; i++) {
-            for (int j = 0; j < m[i].length; j++) {
-                System.out.print(fmt(m[i][j]) + "\t");
+        for (double[] doubles : m) {
+            for (double aDouble : doubles) {
+                System.out.print(fmt(aDouble) + "\t");
             }
             System.out.println();
         }
     }
 
+    /**
+     * 获取Index上的数字
+     * <p>
+     * 注意数组越位
+     *
+     * @param index index
+     * @return 数字
+     */
+    public Double get(int index) {
+        final String s = array.get(index);
+        return Double.parseDouble(s);
+    }
+
+    /**
+     * 获取Index上的数字
+     * <p>
+     * 注意数组越位
+     *
+     * @param index index
+     * @return 数字
+     */
+    public Integer getInt(int index) {
+        final String s = array.get(index);
+        if (s.startsWith("#")) {
+            // 16进制数字
+            return Integer.parseInt(s.substring(1), 16);
+        } else {
+            return Integer.parseInt(s);
+        }
+    }
+
+    /**
+     * 获取期待长度的数组
+     * <p>
+     * 如果无法解析或长度不足则补充0
+     *
+     * @param len 长度
+     * @return 数组
+     */
+    public int[] expectIntArr(int len) {
+        int[] res = new int[len];
+        for (int i = 0; i < len; i++) {
+            if (i >= array.size()) {
+                // 防止越界
+                break;
+            }
+            try {
+                res[i] = getInt(i);
+            } catch (NumberFormatException | IndexOutOfBoundsException e) {
+                res[i] = 0;
+            }
+        }
+        return res;
+
+    }
+
+    /**
+     * 获取期待长度的数组
+     * <p>
+     * 如果无法解析或长度不足则补充0
+     *
+     * @param len 长度
+     * @return 数组
+     */
+    public double[] expectArr(int len) {
+        double[] res = new double[len];
+        for (int i = 0; i < len; i++) {
+            if (i >= array.size()) {
+                // 防止越界
+                break;
+            }
+            try {
+                res[i] = get(i);
+            } catch (NumberFormatException e) {
+                res[i] = 0;
+            }
+        }
+        return res;
+    }
+
     @Override
-    public ST_Array clone(){
+    public ST_Array clone() {
         ST_Array res = new ST_Array();
         for (String item : this.array) {
             res.add(item);
@@ -208,5 +329,17 @@ public class ST_Array extends STBase implements Cloneable{
             sb.append(' ').append(item);
         }
         return sb.toString().trim();
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (obj == this) {
+            return true;
+        }
+        if (!(obj instanceof ST_Array)) {
+            return false;
+        }
+        ST_Array that = (ST_Array) obj;
+        return that.array.equals(this.array);
     }
 }

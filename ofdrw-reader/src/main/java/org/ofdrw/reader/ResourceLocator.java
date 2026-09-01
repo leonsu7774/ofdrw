@@ -78,6 +78,9 @@ public class ResourceLocator {
         while (p != p.getParent()) {
             p = p.getParent();
         }
+        if ((p instanceof OFDDir) == false) {
+            throw new IllegalArgumentException("根路径不是 OFDDir");
+        }
         this.ofdDir = (OFDDir) p;
         this.cd(vc.getAbsLoc().getLoc());
     }
@@ -233,6 +236,25 @@ public class ResourceLocator {
             throw new ErrorPathException("无法切换路径到" + path + "，目录不存在。");
         }
         return this;
+    }
+
+    /**
+     * 路径是否存在
+     *
+     * @param path 末端路径
+     * @return true -存在，false - 不存在
+     */
+    public boolean exist(String path) {
+        String ofwTmp = ofdDir.getSysAbsPath();
+        String fullPath = "";
+        if (path.startsWith("/")) {
+            // 绝对路径
+            fullPath = ofwTmp + path;
+        } else {
+            // 相对路径
+            fullPath = Paths.get(ofwTmp, pwd(), path).toAbsolutePath().toString();
+        }
+        return Files.exists(Paths.get(fullPath));
     }
 
     /**
@@ -393,6 +415,17 @@ public class ResourceLocator {
      */
     public Path getFile(ST_Loc stLoc) throws FileNotFoundException {
         String loc = stLoc.getLoc();
+        return getFile(loc);
+    }
+
+    /**
+     * 获取路径下的文件
+     *
+     * @param loc 路径
+     * @return 系统文件路径
+     * @throws FileNotFoundException 文件或路径不存在
+     */
+    public Path getFile(String loc) throws FileNotFoundException {
         if (loc == null || loc.trim().equals("")) {
             throw new FileNotFoundException("路径为空（loc）");
         }
@@ -438,6 +471,8 @@ public class ResourceLocator {
                 vc = vc.getContainer(item, PageDir::new);
             } else if (item.equals("Res")) {
                 vc = vc.getContainer(item, ResDir::new);
+            } else if (item.startsWith("Temp_")) {
+                vc = vc.getContainer(item, TempsDir::new);
             } else {
                 vc = vc.getContainer(item, VirtualContainer::new);
             }
@@ -464,4 +499,8 @@ public class ResourceLocator {
         }
     }
 
+    @Override
+    public String toString() {
+        return pwd();
+    }
 }

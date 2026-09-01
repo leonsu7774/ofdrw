@@ -206,7 +206,7 @@ public class CT_DrawParam extends OFDElement {
             this.removeAttr("DashOffset");
             return this;
         }
-        this.addAttribute("DashOffset", dashOffset.toString());
+        this.addAttribute("DashOffset", STBase.fmt(dashOffset));
         return this;
     }
 
@@ -283,7 +283,7 @@ public class CT_DrawParam extends OFDElement {
             this.removeAttr("MiterLimit");
             return this;
         }
-        this.addAttribute("MiterLimit", miterLimit.toString());
+        this.addAttribute("MiterLimit", STBase.fmt(miterLimit));
         return this;
     }
 
@@ -320,8 +320,9 @@ public class CT_DrawParam extends OFDElement {
             this.removeOFDElemByNames("FillColor");
             return this;
         }
-        fillColor.setOFDName("FillColor");
-        this.set(fillColor);
+        FillColor color = new FillColor((Element) fillColor.clone());
+        color.setOFDName("FillColor");
+        this.set(color);
         return this;
     }
 
@@ -355,8 +356,9 @@ public class CT_DrawParam extends OFDElement {
             this.removeOFDElemByNames("StrokeColor");
             return this;
         }
-        strokeColor.setOFDName("StrokeColor");
-        this.set(strokeColor);
+        StrokeColor c = new StrokeColor((Element) strokeColor.clone());
+        c.setOFDName("StrokeColor");
+        this.set(c);
         return this;
     }
 
@@ -372,5 +374,12 @@ public class CT_DrawParam extends OFDElement {
     public CT_Color getStrokeColor() {
         Element e = this.getOFDElement("StrokeColor");
         return e == null ? null : new StrokeColor(e);
+    }
+
+    @Override
+    public CT_DrawParam clone() {
+        CT_DrawParam copy = new CT_DrawParam((Element) super.clone());
+        copy.setParent(null);
+        return copy;
     }
 }

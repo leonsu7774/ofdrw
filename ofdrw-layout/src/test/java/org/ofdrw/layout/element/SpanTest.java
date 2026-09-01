@@ -3,11 +3,17 @@ package org.ofdrw.layout.element;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.ofdrw.font.Font;
 import org.ofdrw.layout.Rectangle;
 
+import java.nio.file.Paths;
 import java.util.Arrays;
+import java.util.LinkedList;
 
 public class SpanTest {
+
+    private static final Font DEFAULT_FONT = new Font("宋体", "宋体",
+            Paths.get("src/test/resources/simhei-cut1.ttf").toAbsolutePath());
 
     @Test
     public void split() {
@@ -21,27 +27,47 @@ public class SpanTest {
     @Test
     public void blockSize() {
         Span span = new Span("你好OFD R&W")
+                .setFont(DEFAULT_FONT)
                 .setFontSize(10d);
         Rectangle rectangle = span.blockSize();
-        Assertions.assertEquals(rectangle.getHeight(), 10);
-        Assertions.assertEquals(rectangle.getWidth(), 20 + 7 * 6);
-        Assertions.assertEquals( span.blockSize().getWidth(), 20 + 7 * 6);
+        Assertions.assertEquals(11.40625, rectangle.getHeight(), 0.01);
+        Assertions.assertEquals(rectangle.getWidth(), 20 + 7 * 5);
+        Assertions.assertEquals(span.blockSize().getWidth(), 20 + 7 * 5);
 
         span.setLetterSpacing(3d);
-        Assertions.assertEquals(span.blockSize().getWidth(), 20 + 7 * 6 + 9 * 3);
+        Assertions.assertEquals(span.blockSize().getWidth(), 20 + 7 * 5 + 9 * 3);
 
     }
 
     @Test
-    public void getDeltaX(){
+    public void getDeltaX() {
         Span span = new Span("你好OFD R&W")
                 .setFontSize(10d);
         Double[] deltaX = span.getDeltaX();
         System.out.println(Arrays.toString(deltaX));
         Double[] expect = new Double[]{
-                10d, 10d, 6d, 6d, 6d, 6d, 6d, 6d
+                10d, 10d, 5d, 5d, 5d, 5d, 5d, 5d
         };
 
         Assertions.assertArrayEquals(expect, deltaX);
+    }
+
+    @Test
+    public void splitLineBreak() {
+        Span span = new Span("line 1\n");
+        LinkedList<Span> spans = span.splitLineBreak();
+        Assertions.assertEquals(spans.size(), 1);
+
+        span = new Span("line 1\nline 2");
+        spans = span.splitLineBreak();
+        Assertions.assertEquals(spans.size(), 2);
+
+        span = new Span("line 1\n\nline 3");
+        spans = span.splitLineBreak();
+        Assertions.assertEquals(spans.size(), 3);
+        span = new Span("line 1\n\n\nline 4");
+        spans = span.splitLineBreak();
+        Assertions.assertEquals(spans.size(), 4);
+
     }
 }

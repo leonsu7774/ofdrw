@@ -1,7 +1,6 @@
 package org.ofdrw.layout;
 
 import org.dom4j.DocumentException;
-import org.dom4j.Element;
 import org.ofdrw.core.attachment.Attachments;
 import org.ofdrw.core.attachment.CT_Attachment;
 import org.ofdrw.core.basicStructure.doc.CT_CommonData;
@@ -19,11 +18,14 @@ import org.ofdrw.layout.edit.Annotation;
 import org.ofdrw.layout.edit.AnnotationRender;
 import org.ofdrw.layout.edit.Attachment;
 import org.ofdrw.layout.element.Div;
+import org.ofdrw.layout.edit.Watermark;
 import org.ofdrw.layout.engine.*;
+import org.ofdrw.layout.engine.render.RenderException;
 import org.ofdrw.layout.exception.DocReadException;
+import org.ofdrw.layout.handler.RenderFinishHandler;
+import org.ofdrw.layout.handler.VPageHandler;
 import org.ofdrw.pkg.container.DocDir;
 import org.ofdrw.pkg.container.OFDDir;
-import org.ofdrw.reader.BadOFDException;
 import org.ofdrw.reader.OFDReader;
 import org.ofdrw.reader.PageInfo;
 import org.ofdrw.reader.ResourceLocator;
@@ -31,6 +33,7 @@ import org.ofdrw.reader.ResourceLocator;
 import java.io.Closeable;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
@@ -64,8 +67,14 @@ public class OFDDoc implements Closeable {
     private OFDDir ofdDir;
     /**
      * 打包后OFD文档存放路径
+     * outPath/outStream，二选一
      */
     private Path outPath;
+    /**
+     * 打包后OFD文档输出流
+     * outPath/outStream，二选一
+     */
+    private OutputStream outStream;
     /**
      * 当前文档中所有对象使用标识的最大值。
      * 初始值为 0。MaxUnitID主要用于文档编辑，
@@ -98,6 +107,11 @@ public class OFDDoc implements Closeable {
     private LinkedList<VirtualPage> vPageList = new LinkedList<>();
 
     /**
+     * 流式布局集合 队列（用于编辑）
+     */
+    private LinkedList<StreamCollect> sPageList = new LinkedList<>();
+
+    /**
      * 页面样式
      * <p>
      * 默认为 A4
@@ -123,6 +137,27 @@ public class OFDDoc implements Closeable {
      */
     private Document ofdDocument;
 
+    /**
+     * 正在操作的文档目录
+     */
+    private DocDir operateDocDir;
+
+    /**
+     * 渲染结束时回调函数（可选）
+     */
+    private RenderFinishHandler renderingEndHandler;
+
+
+    /**
+     * 页面解析前处理器
+     */
+    private VPageHandler onPageHandler = null;
+    
+    /**
+     * 文档水印
+     */
+    private Watermark defaultWatermark = null;
+
 
     /**
      * 在指定路径位置上创建一个OFD文件
@@ -137,7 +172,24 @@ public class OFDDoc implements Closeable {
         if (Files.isDirectory(outPath)) {
             throw new IllegalArgumentException("OFD文件存储路径(outPath)不能是目录");
         }
+        final Path parent = outPath.toAbsolutePath().getParent();
+        if (parent == null || !Files.exists(parent)) {
+            throw new IllegalArgumentException("OFD文件存储路径(outPath)上级目录 [" + parent + "] 不存在");
+        }
         this.outPath = outPath;
+    }
+
+    /**
+     * 在指定路径位置上创建一个OFD文件
+     *
+     * @param outStream OFD输出流，由调用者负责关闭。
+     */
+    public OFDDoc(OutputStream outStream) {
+        this();
+        if (outStream == null) {
+            throw new IllegalArgumentException("OFD文件输出流(outStream)为空");
+        }
+        this.outStream = outStream;
     }
 
     /**
@@ -145,6 +197,7 @@ public class OFDDoc implements Closeable {
      *
      * @param reader  OFD解析器
      * @param outPath 修改后文档生成位置
+     * @throws DocReadException 文档读取异常
      */
     public OFDDoc(OFDReader reader, Path outPath) throws DocReadException {
         if (reader == null) {
@@ -157,6 +210,30 @@ public class OFDDoc implements Closeable {
             throw new IllegalArgumentException("OFD文件存储路径(outPath)不能是目录");
         }
         this.outPath = outPath;
+        this.reader = reader;
+        // 通过OFD解析器初始化文档对象
+        try {
+            containerInit(reader);
+        } catch (FileNotFoundException | DocumentException e) {
+            throw new DocReadException("OFD文件解析异常", e);
+        }
+    }
+
+    /**
+     * 修改一个OFD文档
+     *
+     * @param reader    OFD解析器
+     * @param outStream 修改后文档输出流
+     * @throws DocReadException 文档读取异常
+     */
+    public OFDDoc(OFDReader reader, OutputStream outStream) throws DocReadException {
+        if (reader == null) {
+            throw new IllegalArgumentException("OFD解析器(reader)不能为空");
+        }
+        if (outStream == null) {
+            throw new IllegalArgumentException("OFD文件输出流(outStream)为空");
+        }
+        this.outStream = outStream;
         this.reader = reader;
         // 通过OFD解析器初始化文档对象
         try {
@@ -219,8 +296,9 @@ public class OFDDoc implements Closeable {
                 .setOfd(ofd);
         // 创建一个新的文档
         DocDir docDir = ofdDir.newDoc();
+        operateDocDir = docDir;
         docDir.setDocument(ofdDocument);
-        prm = new ResManager(docDir, MaxUnitID);
+        prm = new ResManager(ofdDir, docDir, MaxUnitID);
     }
 
     /**
@@ -245,7 +323,8 @@ public class OFDDoc implements Closeable {
         ST_ID maxUnitID = cdata.getMaxUnitID();
         // 设置当前文档最大ID
         MaxUnitID = new AtomicInteger(maxUnitID.getId().intValue());
-        prm = new ResManager(ofdDir.obtainDocDefault(), MaxUnitID);
+        operateDocDir = ofdDir.obtainDocDefault();
+        prm = new ResManager(reader);
     }
 
     /**
@@ -257,6 +336,10 @@ public class OFDDoc implements Closeable {
      * @return this
      */
     public OFDDoc add(Div item) {
+        if (streamQueue.contains(item)) {
+            throw new IllegalArgumentException("元素已经存在，请重复放入");
+        }
+
         streamQueue.add(item);
         return this;
     }
@@ -275,11 +358,25 @@ public class OFDDoc implements Closeable {
     }
 
     /**
+     * 向文档中加入虚拟页面
+     * <p>
+     * 适合编辑时，添加流式的内容
+     *
+     * @param streamCollect 流式页面
+     * @return this
+     */
+    public OFDDoc addStreamCollect(StreamCollect streamCollect) {
+        sPageList.add(streamCollect);
+        return this;
+    }
+
+
+    /**
      * 获取指定页面追加页面对象
      * <p>
      * 并且追加到虚拟页面列表中
      *
-     * @param pageNum 页码
+     * @param pageNum 页码，从1起。
      * @return 追加页面对象
      */
     public AdditionVPage getAVPage(int pageNum) {
@@ -287,13 +384,21 @@ public class OFDDoc implements Closeable {
             throw new RuntimeException("仅在修改模式下允许获取追加页面对象（AdditionVPage）");
         }
         // 获取页面的OFD对象
-        Page page = reader.getPage(pageNum);
-        // 构造追加页面对象
-        AdditionVPage avp = new AdditionVPage(page);
-        // 自动加入到虚拟页面列表中
-        this.addVPage(avp);
-        return avp;
+        ST_Loc pageAbsLoc = reader.getPageAbsLoc(pageNum);
+        ResourceLocator rl = reader.getResourceLocator();
+        try {
+            Page page = rl.get(pageAbsLoc, Page::new);
+            // 构造追加页面对象
+            AdditionVPage avp = new AdditionVPage(page, pageAbsLoc);
+            avp.setPageNum(pageNum);
+            // 自动加入到虚拟页面列表中
+            this.addVPage(avp);
+            return avp;
+        } catch (FileNotFoundException | DocumentException e) {
+            throw new RuntimeException("OFD解析失败，原因:" + e.getMessage(), e);
+        }
     }
+
 
     /**
      * 向页面中增加注释对象
@@ -301,6 +406,8 @@ public class OFDDoc implements Closeable {
      * @param pageNum    页码
      * @param annotation 注释对象
      * @return this
+     * @throws IOException     文件操作异常
+     * @throws RenderException 渲染异常
      */
     public OFDDoc addAnnotation(int pageNum, Annotation annotation) throws IOException {
         if (annotation == null) {
@@ -321,18 +428,20 @@ public class OFDDoc implements Closeable {
     }
 
     /**
-     * 获取页面样式
+     * 获取页面样式（只读）
+     * <p>
+     * 如果需要重新设置默认的页面样式那么请使用 {@link #setDefaultPageLayout}
      *
-     * @return 页面样式
+     * @return 页面样式(只读)
      */
     public PageLayout getPageLayout() {
-        return pageLayout;
+        return pageLayout.clone();
     }
 
     /**
      * 向文档中添加附件文件
      * <p>
-     * 如果名称相同原有附件将会被替换
+     * 如果名称相同原有附件将会被替换，附件文件将被放置于文档的默认资源目录下"/Doc_0/Res/"。
      *
      * @param attachment 附件文件对象
      * @return this
@@ -343,27 +452,110 @@ public class OFDDoc implements Closeable {
             return this;
         }
         DocDir docDefault = ofdDir.obtainDocDefault();
+        // 若Res不存在则创建
+        String resAbsPath = docDefault.obtainRes().getAbsLoc().toString();
+
+        return this.addAttachment(resAbsPath, attachment);
+    }
+
+    /**
+     * 向文档中添加附件文件
+     * <p>
+     * 如果名称相同原有附件将会被替换，附件文件将被放置于指定目录下，若需要
+     * 创建同名文件请Attachment启用disableReplace参数。
+     *
+     * @param absPath    附件在OFD容器内的绝对位置，若不存在则创建，例如 "/Doc_0/Res/
+     * @param attachment 附件文件对象
+     * @return this
+     * @throws IOException 文件操作异常
+     */
+    public OFDDoc addAttachment(String absPath, Attachment attachment) throws IOException {
+        if (attachment == null) {
+            return this;
+        }
+        if (absPath == null || absPath.startsWith("/") == false) {
+            throw new IllegalArgumentException("附件在OFD容器内的绝对位置(absPath)不能为空或不合法");
+        }
         Path file = attachment.getFile();
-        docDefault.addResource(file);
-        // 构造附件文件存放路径
-        ST_Loc loc = docDefault.getRes().getAbsLoc()
-                .cat(file.getFileName().toString());
+        if (file == null || Files.notExists(file)) {
+            return null;
+        }
+
+        DocDir docDefault = ofdDir.obtainDocDefault();
+        // 构造完整路径
+        ST_Loc fileAbsLoc = new ST_Loc(absPath).cat(file.getFileName().toString());
+        // 将文件放置于指定目录下
+        fileAbsLoc = ofdDir.putFileAbs(fileAbsLoc.toString(), file);
+
+
         // 计算附件所占用的空间，单位KB。
         double size = Files.size(file) / 1024d;
         CT_Attachment ctAttachment = attachment.getAttachment()
                 .setID(String.valueOf(MaxUnitID.incrementAndGet()))
-                .setCreationDate(LocalDate.now())
+                .setCreationDate(LocalDateTime.now())
                 .setSize(size)
-                .setFileLoc(loc);
-        ResourceLocator rl = new ResourceLocator(ofdDir);
+                .setFileLoc(fileAbsLoc);
+        ResourceLocator rl = new ResourceLocator(docDefault);
+
         // 获取附件目录，并切换目录到与附件列表文件同级
         Attachments attachments = obtainAttachments(docDefault, rl);
-        // 清理已经存在的同名附件
-        cleanOldAttachment(rl, attachments, attachment.getName());
+        // 如果没有禁用同名替换，则清理已经存在的同名附件
+        if (attachment.isDisableReplace() == false) {
+            cleanOldAttachment(rl, attachments, attachment.getName());
+        }
         // 加入附件记录
         attachments.addAttachment(ctAttachment);
         return this;
     }
+    
+    
+    /**
+     * 给整个文档增加水印.
+     * 本方法会遍历整个文档，将水印添加到每个页面中。
+     * 按照OFD标准 GB/T 33190-2016 15.2 分页注释文件 的设计水印应该以一种特殊的注释类型写入。
+     * 如果要添加图片类型的水印，请使用 {@link Annotation}, 参考：{@link #addAnnotation(int, Annotation)}
+     * 如果要为指定页码添加水印，请使用 {@link #addAnnotation(int, Annotation)}
+     * @param watermark 水印信息
+     * @throws IOException 文件操作异常
+     * @return this
+     */
+    public OFDDoc addWatermark(Watermark watermark) throws IOException {
+        if (watermark == null) {
+            return this;
+        }
+        
+        if (reader == null) {
+            throw new RuntimeException("仅在修改模式下允许获取追加注释对象，请使用reader构造");
+        }
+        
+        int pageNums = this.reader.getNumberOfPages();
+        if(pageNums == 0){
+            return this;
+        }
+        for(int i = 1; i <= pageNums; i++) {
+            addAnnotation(i, watermark);
+        }
+        return this;
+    }
+
+    /**
+     * 删除指定名称的附件
+     *
+     * @param name 附件名称，若附件不存在则忽略。
+     * @return this
+     * @throws IOException 文件操作异常
+     */
+    public OFDDoc deleteAttachment(String name) throws IOException {
+        if (name == null || name.trim().isEmpty()) {
+            return this;
+        }
+        DocDir docDefault = ofdDir.obtainDocDefault();
+        ResourceLocator rl = new ResourceLocator(docDefault);
+        Attachments attachments = obtainAttachments(docDefault, rl);
+        cleanOldAttachment(rl, attachments, name);
+        return this;
+    }
+
 
     /**
      * 清理已经存在的资源
@@ -423,8 +615,93 @@ public class OFDDoc implements Closeable {
         return attachments;
     }
 
+    /**
+     * 获取 OFD虚拟容器
+     * <p>
+     * 通过虚拟容器API就可以直接操作XML文件和目录结构
+     *
+     * @return OFD虚拟容器
+     */
+    public OFDDir getOfdDir() {
+        return ofdDir;
+    }
+
+    /**
+     * 获取 文档根节点
+     * <p>
+     * 根节点中包含了文档各类信息的入口
+     *
+     * @return 文档根节点
+     */
+    public Document getOfdDocument() {
+        return ofdDocument;
+    }
+
+    /**
+     * 当渲染结束时的回调函数
+     *
+     * @param renderFinishHandler OFD渲染结束时回调函数，可以为null，不调用
+     * @return this
+     */
+    public OFDDoc onRenderFinish(RenderFinishHandler renderFinishHandler) {
+        this.renderingEndHandler = renderFinishHandler;
+        return this;
+    }
+
+    /**
+     * 返回正在编辑文档的Reader对象
+     * <p>
+     * 若为新建文档那么该方法将会返回null
+     *
+     * @return 正在编辑文档的Reader对象
+     */
+    public OFDReader getReader() {
+        return reader;
+    }
+
+    /**
+     * 获取 资源管理器对象
+     * <p>
+     * 通过资源管理器API就可以直接操作文档资源
+     *
+     * @return OFD虚拟容器
+     */
+    public ResManager getResManager() {
+        return prm;
+    }
+
+    /**
+     * 获取 当前解析页面的回调
+     *
+     * @return 当前解析页面的回调，可能为 null 。
+     */
+    public VPageHandler getOnPage() {
+        return this.onPageHandler;
+    }
+
+    /**
+     * 设置 当前解析页面的回调函数
+     * <p>
+     * 通过回调函数可在页面变为OFD内容前向页面追加内容，例如：添加页头、添加页脚。
+     *
+     * @param handler 页面解析前处理器
+     * @return this
+     */
+    public OFDDoc onPage(VPageHandler handler) {
+        this.onPageHandler = handler;
+        return this;
+    }
+
+    /**
+     * 关闭文档，生成OFD
+     * <p>
+     * 注所有文档操作均在close方法执行完成后才会写入文件，打包生成OFD文档。
+     * 每个打开的文档都应该调用该方法。
+     *
+     * @throws IOException 文档操作异常
+     */
     @Override
-    public void close() throws IOException {
+    public synchronized void close() throws IOException {
         if (this.closed) {
             return;
         } else {
@@ -444,26 +721,49 @@ public class OFDDoc implements Closeable {
                 List<VirtualPage> virtualPageList = analyzer.analyze(sgmQueue);
                 vPageList.addAll(virtualPageList);
             }
+            // 流式集合列表
+            if (!sPageList.isEmpty()) {
+                for (StreamCollect sCollect : sPageList) {
+                    List<VirtualPage> pageList = sCollect.analyze(pageLayout);
+                    vPageList.addAll(pageList);
+                }
+            }
 
+            // 虚拟页面布局
             if (!vPageList.isEmpty()) {
                 DocDir docDefault = ofdDir.obtainDocDefault();
                 // 创建虚拟页面解析引擎，并持有文档上下文。
                 VPageParseEngine parseEngine = new VPageParseEngine(pageLayout, docDefault, prm, MaxUnitID);
+                parseEngine.setBeforePageParseHandler(onPageHandler);
                 // 解析虚拟页面
                 parseEngine.process(vPageList);
-            } else if (annotationRender == null && reader == null) {
+            }
+
+
+            if (vPageList.isEmpty() && annotationRender == null && reader == null) {
                 // 虚拟页面为空，也没有注解对象，也不是编辑模式，那么空的操作报错
                 throw new IllegalStateException("OFD文档中没有页面，无法生成OFD文档");
             }
 
+            if (renderingEndHandler != null) {
+                // 执行渲染结束回调函数
+                renderingEndHandler.handle(MaxUnitID, ofdDir, operateDocDir.getIndex());
+            }
             // 设置最大对象ID
             cdata.setMaxUnitID(MaxUnitID.get());
             // final. 执行打包程序
-            ofdDir.jar(outPath.toAbsolutePath());
+            if (outPath != null) {
+                ofdDir.jar(outPath.toAbsolutePath());
+            } else if (outStream != null) {
+                ofdDir.jar(outStream);
+            } else {
+                throw new IllegalArgumentException("OFD文档输出地址错误或没有设置输出流");
+            }
         } finally {
             if (reader != null) {
                 reader.close();
-            } else if (ofdDir != null) {
+            }
+            if (ofdDir != null) {
                 // 清除在生成OFD过程中的工作区产生的文件
                 ofdDir.clean();
             }

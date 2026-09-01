@@ -5,10 +5,11 @@
     <parent>
         <artifactId>ofdrw</artifactId>
         <groupId>org.ofdrw</groupId>
-        <version>1.5.5</version>
+        <version>2.4.0</version>
     </parent>
     <modelVersion>4.0.0</modelVersion>
     <artifactId>ofdrw-gv</artifactId>
+    <name>RW Global Variables</name>
     <description>OFD Reader and Writer 全局变量</description>
 
 </project>

@@ -9,6 +9,7 @@ import org.ofdrw.core.signatures.Signatures;
 import org.ofdrw.core.signatures.appearance.Seal;
 import org.ofdrw.core.signatures.range.Reference;
 import org.ofdrw.core.signatures.range.References;
+import org.ofdrw.core.signatures.sig.Parameters;
 import org.ofdrw.core.signatures.sig.Provider;
 import org.ofdrw.core.signatures.sig.Signature;
 import org.ofdrw.core.signatures.sig.SignedInfo;
@@ -21,10 +22,7 @@ import org.ofdrw.reader.OFDReader;
 import org.ofdrw.reader.ResourceLocator;
 import org.ofdrw.sign.stamppos.StampAppearance;
 
-import java.io.Closeable;
-import java.io.FileNotFoundException;
-import java.io.IOException;
-import java.io.InputStream;
+import java.io.*;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.security.DigestInputStream;
@@ -52,7 +50,7 @@ public class OFDSigner implements Closeable {
     public static final DateTimeFormatter DF = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     /**
-     * OFDRW 签名提供者
+     * @return OFDRW 签名提供者
      */
     public static Provider OFDRW_Provider() {
         return new Provider()
@@ -82,6 +80,10 @@ public class OFDSigner implements Closeable {
      */
     private SignMode signMode;
 
+    /**
+     * 签名扩展属性
+     */
+    private Parameters parameters;
 
     /**
      * 签名列表文件绝对路径
@@ -95,6 +97,16 @@ public class OFDSigner implements Closeable {
      */
     private List<StampAppearance> apList;
 
+
+    /**
+     * 待保护的文件的过滤器
+     * <p>
+     * 该过滤器会在签章之前调用，它会遍历OFD内的
+     * 每一个文件，由过滤器的结果来决定是否需要加入到签章保护范围中去。
+     */
+    private ProtectFileFilter protectFileFilter;
+
+
     /**
      * 签名实现容器
      */
@@ -106,9 +118,20 @@ public class OFDSigner implements Closeable {
     private Path out;
 
     /**
+     * 电子签名后文件输出流
+     */
+    private OutputStream outStream;
+
+    /**
      * 是否已经执行exeSign
      */
     private boolean hasSign;
+
+    /**
+     * 【2.0 版增加】
+     * 此签名基于的签名标识符，一旦签名标注的该属性，则验证时应同时验证“基”签名
+     */
+    private String relativeID = null;
 
 
     /**
@@ -119,10 +142,59 @@ public class OFDSigner implements Closeable {
 
     /**
      * 创建OFD签名对象
+     * <p>
+     * 默认使用数字类型的ID构造器提供电子签章的ID
+     *
+     * @param reader    OFD解析器
+     * @param outStream 电子签名后文件保存位置
+     * @throws SignatureTerminateException 签名终止异常
+     * @since 2022-6-24 23:21:18
+     */
+    public OFDSigner(OFDReader reader, OutputStream outStream) throws SignatureTerminateException {
+        if (reader == null) {
+            throw new IllegalArgumentException("OFD解析器（reader）为空");
+        }
+        if (outStream == null) {
+            throw new IllegalArgumentException("电子签名后文件输出流（outStream）为空");
+        }
+
+
+        this.outStream = outStream;
+        setProperty(reader, new NumberFormatAtomicSignID(false));
+    }
+
+
+    /**
+     * 创建OFD签名对象
+     *
+     * @param reader     OFD解析器
+     * @param outStream  电子签名后文件保存位置
+     * @param idProvider 签名文件ID提供器
+     * @throws SignatureTerminateException 签名终止异常
+     * @since 2020-08-24 20:35:45
+     */
+    public OFDSigner(OFDReader reader, OutputStream outStream, SignIDProvider idProvider) throws SignatureTerminateException {
+        if (reader == null) {
+            throw new IllegalArgumentException("OFD解析器（reader）为空");
+        }
+        if (outStream == null) {
+            throw new IllegalArgumentException("电子签名后文件输出流（outStream）为空");
+        }
+        if (idProvider == null) {
+            throw new IllegalArgumentException("签名文件ID提供器（idProvider）为空");
+        }
+
+        this.outStream = outStream;
+        setProperty(reader, idProvider);
+    }
+
+    /**
+     * 创建OFD签名对象
      *
      * @param reader     OFD解析器
      * @param out        电子签名后文件保存位置
      * @param idProvider 签名文件ID提供器
+     * @throws SignatureTerminateException 签名终止异常
      * @since 2020-08-24 20:35:45
      */
     public OFDSigner(OFDReader reader, Path out, SignIDProvider idProvider) throws SignatureTerminateException {
@@ -136,8 +208,15 @@ public class OFDSigner implements Closeable {
             throw new IllegalArgumentException("签名文件ID提供器（idProvider）为空");
         }
 
-        this.reader = reader;
         this.out = out;
+        setProperty(reader, idProvider);
+    }
+
+    /**
+     * 数据初始化
+     */
+    private void setProperty(OFDReader reader, SignIDProvider idProvider) throws SignatureTerminateException {
+        this.reader = reader;
         this.ofdDir = reader.getOFDDir();
         this.hasSign = false;
         // 初始化从0起的最大签名ID，如果源文档中已经存在签名文件的情况
@@ -158,6 +237,7 @@ public class OFDSigner implements Closeable {
      *
      * @param reader OFD解析器
      * @param out    电子签名后文件保存位置
+     * @throws SignatureTerminateException 签名终止异常
      */
     public OFDSigner(OFDReader reader, Path out) throws SignatureTerminateException {
         this(reader, out, new StandFormatAtomicSignID());
@@ -231,7 +311,8 @@ public class OFDSigner implements Closeable {
             // 获取Doc_0 的签名列表文件位置
             signaturesLoc = reader.getDefaultDocSignaturesPath();
             // 如果OFD.xml 不含有签名列表文件路径，那么设置需要更新
-            if (signaturesLoc == null) {
+            // 如果  Signature.xml 文件不存在时候，也需要重新创建
+            if (signaturesLoc == null || (!rl.exist(signaturesLoc.toString()))) {
                 // 最大签名ID从0起的
                 return;
             }
@@ -253,7 +334,7 @@ public class OFDSigner implements Closeable {
                 ST_Loc baseLoc = sig.getBaseLoc();
                 Signature sigObj = rl.get(baseLoc, Signature::new);
                 References refList = sigObj.getSignedInfo().getReferences();
-                if (refList.hasFile(signaturesLoc.getFileName())) {
+                if (refList.hasFile(signaturesLoc.getLoc())) {
                     throw new SignatureTerminateException("签名列表文件（Signatures.xml）已经被保护，文档不允许继续追加签名");
                 }
             }
@@ -285,13 +366,21 @@ public class OFDSigner implements Closeable {
                 String abxFilePath = FilenameUtils.separatorsToUnix(file.toAbsolutePath().toString());
                 // 替换文件系统的根路径，这样就为容器系统中的绝对路径
                 abxFilePath = abxFilePath.replace(sysRoot, "");
+                final ToDigestFileInfo fileInfo = new ToDigestFileInfo(abxFilePath, file);
+                // 执行文件的过滤行为通过过滤器选择出需要保护的文档。
+                try {
+                    if (protectFileFilter != null && !protectFileFilter.filter(fileInfo.getAbsPath())) {
+                        return FileVisitResult.CONTINUE;
+                    }
+                } catch (Exception ignore) {
+                }
                 // 如果采用继续签章模式，那么跳过对 Signatures.xml 的文件
                 if (signMode == SignMode.ContinueSign
                         && abxFilePath.equals(signaturesLoc.getLoc())) {
                     return FileVisitResult.CONTINUE;
                 }
                 // 构造加入文件信息列表
-                res.add(new ToDigestFileInfo(abxFilePath, file));
+                res.add(fileInfo);
                 return FileVisitResult.CONTINUE;
             }
         });
@@ -326,10 +415,11 @@ public class OFDSigner implements Closeable {
         /*
          * 1. 获取签名列表文件对象
          *
-         * 根据需要可能需要根性OFD.xml
+         * 先尝试获取已经存在的 签名列表文件 Signatures.xml
+         * 根据需要可能需要更新OFD.xml
          */
-        Signatures signListObj = null;
-        if (signaturesLoc == null) {
+        Signatures signListObj = reader.getDefaultSignatures();
+        if (signaturesLoc == null || signListObj == null) {
             signListObj = new Signatures();
             signsDir.setSignatures(signListObj);
 
@@ -344,8 +434,6 @@ public class OFDSigner implements Closeable {
             } catch (DocumentException e) {
                 throw new BadOFDException("OFD.xml 文件解析失败");
             }
-        } else {
-            signListObj = reader.getDefaultSignatures();
         }
 
         /*
@@ -355,14 +443,19 @@ public class OFDSigner implements Closeable {
          */
         // 签名文件
         ST_Loc signatureLoc = signDir.getAbsLoc().cat(SignDir.SignatureFileName);
-        // 构造列表文件中的签名记录并放入签名列表中
-        signListObj.addSignature(new org.ofdrw.core.signatures.Signature()
+        // 构造列表文件中的签名记录
+        final org.ofdrw.core.signatures.Signature signatureRecord = new org.ofdrw.core.signatures.Signature()
                 // 设置ID
                 .setID(MaxSignID.incrementAndGet())
                 // 设置数字签名类型
                 .setType(signContainer.getSignType())
                 // 设置签名文件位置
-                .setBaseLoc(signatureLoc));
+                .setBaseLoc(signatureLoc);
+        if (this.relativeID != null && this.relativeID.trim().length() > 0) {
+            signatureRecord.setRelative(this.relativeID);
+        }
+        // 放入签名列表中
+        signListObj.addSignature(signatureRecord);
         /*
          * 3. 构建签名文件对象
          *
@@ -409,6 +502,8 @@ public class OFDSigner implements Closeable {
                 .setProvider(OFDRW_Provider())
                 // 设置签名方法
                 .setSignatureMethod(signContainer.getSignAlgOID())
+                // 设置签名扩展属性
+                .setParameters(parameters)
                 // 设置签名时间
                 .setSignatureDateTime(DF.format(LocalDateTime.now()));
 
@@ -519,8 +614,52 @@ public class OFDSigner implements Closeable {
             throw new IllegalStateException("请先执行 exeSign在关闭引擎完成数字签名。");
         }
         // 打包电子签名后的OFD文件
-        ofdDir.jar(out);
+        if (out != null) {
+            ofdDir.jar(out);
+        } else if (outStream != null) {
+            ofdDir.jar(outStream);
+        } else {
+            throw new IllegalArgumentException("OFD文档输出目录错误或没有设置输出流");
+        }
         // 关闭OFD解析器
         reader.close();
+    }
+
+    /**
+     * 设置 文件过滤器
+     * <p>
+     * 通过过滤器来实现选择需要保护的文件
+     *
+     * @param filter 过滤器
+     * @return this
+     */
+    public OFDSigner setProtectFileFilter(ProtectFileFilter filter) {
+        this.protectFileFilter = filter;
+        return this;
+    }
+
+    /**
+     * 【可选 OFD 2.0】
+     * 设置 此签名基于的签名标识符
+     * <p>
+     * 一旦签名标注的该属性，则验证时应同时验证“基”签名
+     *
+     * @param id “基”签名ID
+     * @return this
+     */
+    public OFDSigner setRelative(String id) {
+        this.relativeID = id;
+        return this;
+    }
+
+    /**
+     * 设置签名扩展属性
+     *
+     * @param parameters 扩展属性
+     * @return this
+     */
+    public OFDSigner setParameters(Parameters parameters) {
+        this.parameters = parameters;
+        return this;
     }
 }

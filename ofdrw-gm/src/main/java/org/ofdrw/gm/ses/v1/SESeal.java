@@ -2,6 +2,7 @@ package org.ofdrw.gm.ses.v1;
 
 import org.bouncycastle.asn1.*;
 
+import java.io.IOException;
 import java.util.Enumeration;
 
 /**
@@ -33,12 +34,30 @@ public class SESeal extends ASN1Object {
     public SESeal(ASN1Sequence seq) {
         Enumeration<?> e = seq.getObjects();
         esealInfo = SES_SealInfo.getInstance(e.nextElement());
-        signInfo = SES_SignInfo.getInstance(e.nextElement());
+        /*
+         * 兼容非标签章 非标签章的签名信息格式与标准不同无法解析
+         * */
+        try {
+            signInfo = SES_SignInfo.getInstance(e.nextElement());
+        } catch (Exception exception) {
+
+        }
     }
 
     public static SESeal getInstance(Object o) {
         if (o instanceof SESeal) {
             return (SESeal) o;
+        } else if (o instanceof byte[]) {
+            ASN1InputStream aIn = new ASN1InputStream((byte[]) o);
+            try {
+                ASN1Primitive obj = aIn.readObject();
+                return new SESeal(ASN1Sequence.getInstance(obj));
+            } catch (IOException e) {
+                throw new IllegalArgumentException("电子印章数据 无法解析", e);
+            }
+        } else if (o instanceof DEROctetString) {
+            DEROctetString string = (DEROctetString) o;
+            return new SESeal(ASN1Sequence.getInstance(string.getOctets()));
         } else if (o != null) {
             return new SESeal(ASN1Sequence.getInstance(o));
         }

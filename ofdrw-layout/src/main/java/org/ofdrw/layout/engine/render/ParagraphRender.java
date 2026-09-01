@@ -1,19 +1,16 @@
 package org.ofdrw.layout.engine.render;
 
-import org.ofdrw.core.basicStructure.pageObj.layer.CT_Layer;
 import org.ofdrw.core.basicStructure.pageObj.layer.block.CT_PageBlock;
 import org.ofdrw.core.basicStructure.pageObj.layer.block.PathObject;
 import org.ofdrw.core.basicStructure.pageObj.layer.block.TextObject;
 import org.ofdrw.core.basicType.ST_Box;
 import org.ofdrw.core.basicType.ST_ID;
+import org.ofdrw.core.basicType.ST_Loc;
 import org.ofdrw.core.graph.pathObj.AbbreviatedData;
 import org.ofdrw.core.pageDescription.color.color.CT_Color;
 import org.ofdrw.core.text.TextCode;
 import org.ofdrw.core.text.text.Weight;
-import org.ofdrw.layout.element.Paragraph;
-import org.ofdrw.layout.element.PlaceholderSpan;
-import org.ofdrw.layout.element.Span;
-import org.ofdrw.layout.element.TxtLineBlock;
+import org.ofdrw.layout.element.*;
 import org.ofdrw.layout.engine.ResManager;
 
 import java.io.IOException;
@@ -22,11 +19,29 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 段落渲染器
+ * <p>
+ * {@link org.ofdrw.layout.element.Paragraph} 的渲染器
  *
  * @author 权观宇
  * @since 2020-03-24 04:31:37
  */
-public class ParagraphRender {
+public class ParagraphRender implements Processor {
+    /**
+     * 执行段落渲染
+     *
+     * @param pageLoc    页面在虚拟容器中绝对路径。
+     * @param layer      图片将要放置的图层
+     * @param resManager 资源管理器
+     * @param e          段落对象
+     * @param maxUnitID  最大元素ID提供器
+     * @throws RenderException 渲染发生错误
+     */
+    @Override
+    public void render(ST_Loc pageLoc, CT_PageBlock layer, ResManager resManager, Div e, AtomicInteger maxUnitID) throws RenderException{
+        if (e instanceof Paragraph) {
+            render(layer, resManager, (Paragraph) e, maxUnitID);
+        }
+    }
 
     /**
      * 将段落渲染到图层上
@@ -64,7 +79,21 @@ public class ParagraphRender {
         // 渲染每一行文字
         for (TxtLineBlock txtLine : lines) {
             // 行内的X偏移量为行开头
-            double offsetX = lineTopX;
+            double offsetX;
+            // 根据浮动方式确定起始字符坐标
+            switch (txtLine.getTextAlign()) {
+                case right:
+                    offsetX = lineTopX + (txtLine.getLineMaxAvailableWidth() - txtLine.getWidth());
+                    break;
+                case center:
+                    offsetX = lineTopX + (txtLine.getLineMaxAvailableWidth() - txtLine.getWidth()) / 2;
+                    break;
+                case left:
+                default:
+                    offsetX = lineTopX;
+                    break;
+            }
+
             // 一行内的所有Span的图元高度都为行高度（最高文字高度 + 行间距）
             double h = txtLine.getHeight();
             if (hCount + h > containerHeight) {
@@ -101,13 +130,20 @@ public class ParagraphRender {
                         .setFont(id.ref())
                         // 设置字体大小
                         .setSize(s.getFontSize());
-                // 判断字体是否加粗
-                if (s.isBold()) {
+                // 设置字体粗细
+                if (s.getWeight() != null) {
+                    txtObj.setWeight(s.getWeight());
+                } else if (s.isBold()) {
                     txtObj.setWeight(Weight.W_800);
                 }
+
                 // 是否是斜体
                 if (s.isItalic()) {
                     txtObj.setItalic(true);
+                }
+                // 是否填充，默认为true表示填充
+                if (!s.isFill()) {
+                    txtObj.setFill(false);
                 }
                 // 设置字体颜色，默认颜色为黑色
                 int[] color = s.getColor();
@@ -137,7 +173,13 @@ public class ParagraphRender {
                 if (s.isUnderline()) {
                     ST_ID underlineId = new ST_ID(maxUnitID.incrementAndGet());
                     // 构造下划线
-                    PathObject underline = drawUnderline(underlineId, boundary, offset);
+                    double underlineOffset = offset + s.getUnderlineOffset();
+                    double underlineWidth = s.getUnderlineWidth();
+                    if (underlineWidth == 0) {
+                        // 0.05 比例系数为经验值
+                        underlineWidth = s.getFontSize() * 0.05;
+                    }
+                    PathObject underline = drawUnderline(underlineId, boundary, color, underlineOffset, underlineWidth);
                     if (e.getOpacity() != null) {
                         // 图元透明度
                         underline.setAlpha((int) (e.getOpacity() * 255));
@@ -159,15 +201,19 @@ public class ParagraphRender {
      *
      * @param id       下划线ID
      * @param boundary 绘制下划线的区域
+     * @param color    下划线颜色 [R, G, B]
      * @param offset   在绘制区域内Y的偏移量
+     * @param width    下划线线宽
      * @return 路径对象
      */
-    private static PathObject drawUnderline(ST_ID id, ST_Box boundary, double offset) {
+    private static PathObject drawUnderline(ST_ID id, ST_Box boundary, int[] color, double offset, double width) {
         PathObject res = new PathObject(id);
-        offset += 1.2d;
+        if (color != null && color.length >= 3) {
+            res.setStrokeColor(CT_Color.rgb(color));
+        }
         res.setBoundary(boundary)
                 .setAbbreviatedData(new AbbreviatedData().M(0, offset).lineTo(boundary.getWidth(), offset))
-                .setLineWidth(0.353);
+                .setLineWidth(width);
         return res;
     }
 }

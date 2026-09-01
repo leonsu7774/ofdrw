@@ -1,0 +1,35 @@
+name: Deploy to Maven Central
+
+on:
+  push:
+    tags:
+      - '*.*.*'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Apache Maven Central
+        uses: actions/setup-java@v5
+        with:
+          java-version: '8'
+          server-id: central
+          distribution: 'temurin'
+          server-username: SERVER_USERNAME
+          server-password: SERVER_PASSWORD
+          gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
+          gpg-passphrase: GPG_PASSPHRASE
+
+      - name: Publish to Apache Maven Central
+        run: mvn clean deploy -DskipTests --no-transfer-progress
+        env:
+          SERVER_USERNAME: ${{ secrets.OSSRH_USERNAME }}
+          SERVER_PASSWORD: ${{ secrets.OSSRH_TOKEN }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}

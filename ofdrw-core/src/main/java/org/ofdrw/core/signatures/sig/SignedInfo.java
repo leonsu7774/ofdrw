@@ -13,6 +13,8 @@ import java.util.List;
  * 签名要保护的原文及本次签名相关的信息
  * <p>
  * 18.2.1 文件摘要 图 86 表 67
+ * <p>
+ * GMT0099 B.2 图 B.2
  *
  * @author 权观宇
  * @since 2019-11-20 07:23:38
@@ -120,6 +122,33 @@ public class SignedInfo extends OFDElement {
      */
     public String getSignatureDateTime() {
         return this.getOFDElementText("SignatureDateTime");
+    }
+
+    /**
+     * 【可选 OFD 2.0】
+     * 设置 扩展签名属性集
+     *
+     * @param parameters 扩展签名属性集，null表示删除
+     * @return this
+     */
+    public SignedInfo setParameters(Parameters parameters) {
+        if (parameters == null) {
+            this.removeOFDElemByNames("Parameters");
+            return this;
+        }
+        this.set(parameters);
+        return this;
+    }
+
+    /**
+     * 【可选 OFD 2.0】
+     * 获取 扩展签名属性集
+     *
+     * @return 扩展签名属性集，可能为null
+     */
+    public Parameters getParameters() {
+        Element e = this.getOFDElement("Parameters");
+        return e == null ? null : new Parameters(e);
     }
 
 

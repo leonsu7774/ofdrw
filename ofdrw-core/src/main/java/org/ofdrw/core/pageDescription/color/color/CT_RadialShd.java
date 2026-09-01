@@ -82,7 +82,7 @@ public class CT_RadialShd extends OFDElement implements ColorClusterType {
             this.removeAttr("MapUnit");
             return this;
         }
-        this.addAttribute("MapUnit", mapUnit.toString());
+        this.addAttribute("MapUnit", STBase.fmt(mapUnit));
         return this;
     }
 
@@ -120,7 +120,7 @@ public class CT_RadialShd extends OFDElement implements ColorClusterType {
             this.removeAttr("Eccentricity");
             return this;
         }
-        this.addAttribute("Eccentricity", eccentricity.toString());
+        this.addAttribute("Eccentricity", STBase.fmt(eccentricity));
         return this;
     }
 
@@ -157,7 +157,7 @@ public class CT_RadialShd extends OFDElement implements ColorClusterType {
         if (angle == null) {
             this.removeAttr("Angle");
         }
-        this.addAttribute("Angle", angle.toString());
+        this.addAttribute("Angle", STBase.fmt(angle));
         return this;
     }
 
@@ -190,7 +190,7 @@ public class CT_RadialShd extends OFDElement implements ColorClusterType {
         if (startPoint == null) {
             throw new IllegalArgumentException("起始椭圆的的中心点（startPoint）不能为空");
         }
-        this.addAttribute("startPoint", startPoint.toString());
+        this.addAttribute("StartPoint", startPoint.toString());
         return this;
     }
 

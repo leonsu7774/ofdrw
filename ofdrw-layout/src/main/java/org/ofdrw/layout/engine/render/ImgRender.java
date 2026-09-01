@@ -1,10 +1,11 @@
 package org.ofdrw.layout.engine.render;
 
-import org.ofdrw.core.basicStructure.pageObj.layer.CT_Layer;
 import org.ofdrw.core.basicStructure.pageObj.layer.block.CT_PageBlock;
 import org.ofdrw.core.basicStructure.pageObj.layer.block.ImageObject;
 import org.ofdrw.core.basicType.ST_Array;
 import org.ofdrw.core.basicType.ST_ID;
+import org.ofdrw.core.basicType.ST_Loc;
+import org.ofdrw.layout.element.Div;
 import org.ofdrw.layout.element.Img;
 import org.ofdrw.layout.engine.ResManager;
 
@@ -15,11 +16,29 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 图片渲染对象
+ * <p>
+ * {@link org.ofdrw.layout.element.Img} 的渲染器
  *
  * @author 权观宇
  * @since 2020-03-22 13:17:52
  */
-public class ImgRender {
+public class ImgRender implements Processor {
+    /**
+     * 执行图片渲染
+     *
+     * @param pageLoc    页面在虚拟容器中绝对路径。
+     * @param layer      图片将要放置的图层
+     * @param resManager 资源管理器
+     * @param e          图片对象
+     * @param maxUnitID  最大元素ID提供器
+     * @throws RenderException 渲染发生错误
+     */
+    @Override
+    public void render(ST_Loc pageLoc, CT_PageBlock layer, ResManager resManager, Div e, AtomicInteger maxUnitID)throws RenderException {
+        if (e instanceof Img) {
+            render(layer, resManager, (Img) e, maxUnitID);
+        }
+    }
 
     /**
      * 渲染图片对象

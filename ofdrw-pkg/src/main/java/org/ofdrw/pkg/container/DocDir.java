@@ -39,6 +39,54 @@ public class DocDir extends VirtualContainer {
     public static final String DocumentResFileName = "DocumentRes.xml";
 
     /**
+     * 数字签名容器名称
+     */
+    public static final String SignsDir = "Signs";
+
+    /**
+     * 数字签名容器名称前缀
+     */
+    public static final String SignContainerPrefix = "Sign_";
+
+    /**
+     * 自定义标签容器名称
+     * <p>
+     * GMT0099 OFD 2.0
+     */
+    public static final String TagsDir = "Tags";
+
+    /**
+     * 临时文件容器
+     * <p>
+     * OFD 2.0
+     */
+    public static final String TempsDir = "Temps";
+
+
+    /**
+     * 页面容器
+     */
+    public static final String PagesDir = "Pages";
+
+    /**
+     * 页面容器名称前缀
+     */
+    public static final String PageContainerPrefix = "Page_";
+
+    /**
+     * 资源容器
+     */
+    public static final String ResDir = "Res";
+
+    /**
+     * 注释文件虚拟容器
+     * <p>
+     * GMT0099 OFD 2.0
+     */
+    public static final String AnnotsDir = "Annots";
+
+
+    /**
      * 注释入口文件名称
      */
     public static final String AnnotationsFileName = "Annotations.xml";
@@ -137,6 +185,7 @@ public class DocDir extends VirtualContainer {
 
     /**
      * 获取注释列表对象
+     *
      * @return 注释列表对象
      * @throws FileNotFoundException 文档自身资源索引文件不存在
      * @throws DocumentException     文档自身资源索引文件解析异常
@@ -148,7 +197,10 @@ public class DocDir extends VirtualContainer {
 
     /**
      * 设置注释列表对象
+     * <p>
+     * 推荐使用 {@link  org.ofdrw.pkg.container.AnnotsDir#setAnnotations(Annotations)}
      *
+     * @param annotations 注释列表对象
      * @return 注释列表对象
      */
     public DocDir setAnnotations(Annotations annotations) {
@@ -174,7 +226,7 @@ public class DocDir extends VirtualContainer {
      * @throws FileNotFoundException 资源容器不存在
      */
     public ResDir getRes() throws FileNotFoundException {
-        return this.getContainer("Res", ResDir::new);
+        return this.getContainer(DocDir.ResDir, ResDir::new);
     }
 
 
@@ -183,10 +235,10 @@ public class DocDir extends VirtualContainer {
      * <p>
      * 如果资源文件不存在则创建
      *
-     * @return this
+     * @return 资源目录
      */
     public ResDir obtainRes() {
-        return this.obtainContainer("Res", ResDir::new);
+        return this.obtainContainer(DocDir.ResDir, ResDir::new);
     }
 
     /**
@@ -196,7 +248,7 @@ public class DocDir extends VirtualContainer {
      * @throws FileNotFoundException 数字签名存储目录不存在
      */
     public SignsDir getSigns() throws FileNotFoundException {
-        return this.getContainer("Signs", SignsDir::new);
+        return this.getContainer(DocDir.SignsDir, SignsDir::new);
     }
 
     /**
@@ -207,7 +259,7 @@ public class DocDir extends VirtualContainer {
      * @return 数字签名存储目录
      */
     public SignsDir obtainSigns() {
-        return this.obtainContainer("Signs", SignsDir::new);
+        return this.obtainContainer(DocDir.SignsDir, SignsDir::new);
     }
 
     /**
@@ -217,7 +269,7 @@ public class DocDir extends VirtualContainer {
      * @throws FileNotFoundException 页面存储目录不存在
      */
     public PagesDir getPages() throws FileNotFoundException {
-        return this.getContainer("Pages", PagesDir::new);
+        return this.getContainer(DocDir.PagesDir, PagesDir::new);
     }
 
     /**
@@ -228,7 +280,82 @@ public class DocDir extends VirtualContainer {
      * @return 页面存储目录
      */
     public PagesDir obtainPages() {
-        return this.obtainContainer("Pages", PagesDir::new);
+        return this.obtainContainer(DocDir.PagesDir, PagesDir::new);
+    }
+
+    /**
+     * 获取 自定义标签容器
+     * <p>
+     * 如果目录不存在则会创建
+     * <p>
+     * GMT0099 OFD 2.0
+     *
+     * @return 自定义标签容器
+     */
+    public VirtualContainer obtainTags() {
+        return this.obtainContainer(DocDir.TagsDir, VirtualContainer::new);
+    }
+
+    /**
+     * 获取 自定义标签容器
+     * <p>
+     * GMT0099 OFD 2.0
+     *
+     * @return 自定义标签容器
+     * @throws FileNotFoundException 页面存储目录不存在
+     */
+    public VirtualContainer getTags() throws FileNotFoundException {
+        return this.getContainer(DocDir.TagsDir, VirtualContainer::new);
+    }
+
+    /**
+     * 获取 模板容器
+     * <p>
+     * 如果目录不存在则会创建
+     * <p>
+     * GMT0099 OFD 2.0
+     *
+     * @return 模板容器
+     */
+    public TempsDir obtainTemps() {
+        return this.obtainContainer(DocDir.TempsDir, TempsDir::new);
+    }
+
+    /**
+     * 获取 模板容器
+     * <p>
+     * GMT0099 OFD 2.0
+     *
+     * @return 模板容器
+     * @throws FileNotFoundException 页面存储目录不存在
+     */
+    public TempsDir getTemps() throws FileNotFoundException {
+        return this.getContainer(DocDir.TempsDir, TempsDir::new);
+    }
+
+    /**
+     * 获取 注释容器
+     * <p>
+     * 如果目录不存在则会创建
+     * <p>
+     * GMT0099 OFD 2.0
+     *
+     * @return 注释容器
+     */
+    public AnnotsDir obtainAnnots() {
+        return this.obtainContainer(DocDir.AnnotsDir, AnnotsDir::new);
+    }
+
+    /**
+     * 获取 注释容器
+     * <p>
+     * GMT0099 OFD 2.0
+     *
+     * @return 注释容器
+     * @throws FileNotFoundException 页面存储目录不存在
+     */
+    public AnnotsDir getAnnots() throws FileNotFoundException {
+        return this.getContainer(DocDir.AnnotsDir, AnnotsDir::new);
     }
 
 
@@ -242,6 +369,17 @@ public class DocDir extends VirtualContainer {
     public DocDir addResource(Path resource) throws IOException {
         obtainRes().add(resource);
         return this;
+    }
+
+    /**
+     * 增加资源 并返回资源在文档中的绝对路径
+     *
+     * @param resource 资源
+     * @return 文件复制后的绝对路径
+     * @throws IOException 文件复制过程中IO异常
+     */
+    public Path addResourceWithPath(Path resource) throws IOException {
+        return obtainRes().addWithPath(resource);
     }
 
     /**

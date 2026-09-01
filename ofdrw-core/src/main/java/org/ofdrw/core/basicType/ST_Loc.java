@@ -3,6 +3,8 @@ package org.ofdrw.core.basicType;
 
 import org.dom4j.Element;
 
+import java.util.ArrayList;
+
 /**
  * 包结构内文件的路径，“.”表示当前路径，“..”表示符路径
  * <p>
@@ -70,11 +72,37 @@ public class ST_Loc extends STBase {
 
     /**
      * 路径分割
+     * <p>
+     * 通过该方法获取的路径中可能含有 "" 空字符串，
+     * 如果需要获取路径的各个部分，请使用 {@link #parts()}
      *
      * @return 各个子路径
      */
     public String[] split() {
+        if (loc == null) {
+            return new String[0];
+        }
         return this.loc.split("/");
+    }
+
+    /**
+     * 获取路径的各个部分
+     *
+     * @return 路径的各个部分
+     */
+    public String[] parts() {
+        if (loc == null) {
+            return new String[0];
+        }
+        String[] split = this.loc.split("/");
+        // 移除split中为空的元素
+        ArrayList<String> paths = new ArrayList<>();
+        for (String s : split) {
+            if (s != null && s.trim().length() > 0) {
+                paths.add(s);
+            }
+        }
+        return paths.toArray(new String[0]);
     }
 
     /**
@@ -88,6 +116,15 @@ public class ST_Loc extends STBase {
             return "";
         }
         return loc.substring(0, indexOf);
+    }
+
+    /**
+     * 获取父母路径
+     *
+     * @return 父母路径
+     */
+    public ST_Loc parentLoc() {
+        return new ST_Loc(this.parent());
     }
 
     /**
@@ -125,6 +162,7 @@ public class ST_Loc extends STBase {
         }
         return new ST_Loc(part1 + "/" + p2);
     }
+
     /**
      * 路径拼接
      *
@@ -140,6 +178,7 @@ public class ST_Loc extends STBase {
 
     /**
      * 是否以指定字符结尾
+     *
      * @param suffix 指定字符
      * @return true 指定字符结尾；false 不以指定字符结尾
      */
@@ -147,10 +186,66 @@ public class ST_Loc extends STBase {
         return loc.endsWith(suffix);
     }
 
+    /**
+     * 是否以指定字符开头
+     *
+     * @param prefix 前缀
+     * @return true 指定字符开头；false 不以指定字符开头
+     */
+    public boolean startWith(String prefix) {
+        return loc.startsWith(prefix);
+    }
+
+    /**
+     * 是否为根路径（以"/"开头）
+     *
+     * @return true - 根路径
+     */
+    public boolean isRootPath() {
+        return loc.startsWith("/");
+    }
+
+    /**
+     * 是否为空或空串
+     *
+     * @return true - 空；false - 非空
+     */
+    public boolean isEmpty() {
+        return loc == null || loc.trim().length() == 0;
+    }
+
     @Override
     public String toString() {
         return loc;
     }
 
+    @Override
+    public boolean equals(Object obj) {
+        if (obj instanceof String) {
+            return loc.equals(obj);
+        }
+        if (obj instanceof ST_Loc) {
+            return loc.equals(((ST_Loc) obj).loc);
+        }
+        return loc.equals(obj.toString());
+    }
 
+    /**
+     * 比较两个路径是否相等
+     *
+     * @param a 比较对象a
+     * @param b 比较对象b
+     * @return true - 相等，false - 不相等
+     */
+    public static boolean equal(Object a, Object b) {
+        if (a == null || b == null) {
+            return false;
+        }
+        if (a instanceof ST_Loc && b instanceof ST_Loc) {
+            return ((ST_Loc) a).loc.equals(((ST_Loc) b).loc);
+        }
+        String aStr = a.toString();
+        String bStr = b.toString();
+        return aStr.equals(bStr);
+    }
 }

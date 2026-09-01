@@ -1,6 +1,6 @@
 # 签名签章 验证 快速入门
 
-***免责：电子文档的电子签章流程需要符合国家相关标准和规范。要产生具有效力的电子签名/签章，请使用符合国家密码局要求具有相关型号证书的密码设备进行。***
+***免责：电子文档的电子签章流程需要符合国家相关标准和规范。要产生具有效力的电子签名/签章，请使用符合国家密码局要求具有相关认证证书的密码设备进行。***
 
 
 `ofdrw-sign`已经对OFD文档的电子签章过程完成比较高程度的封装，
@@ -11,10 +11,11 @@
 <dependency>
     <groupId>org.ofdrw</groupId>
     <artifactId>ofdrw-sign</artifactId>
-    <version>1.5.5</version>
+    <version>2.4.0</version>
 </dependency>
 ```
 
+> - 若您没有采用Maven管理项目，请参阅项目中`pom.xml`文件中的依赖，手动解决三方依赖包问题。
 
 实现电子签章你需要下面步骤：
 
@@ -55,7 +56,9 @@ public static void main() throws Exception {
     - [测试用例](../../src/test/java/org/ofdrw/sign/signContainer/SESV1ContainerTest.java)
 - [GB/T 38540-2020 电子签章结构实现 SESV4Container](../../src/main/java/org/ofdrw/sign/signContainer/SESV4Container.java)
     - [测试用例](../../src/test/java/org/ofdrw/sign/signContainer/SESV4ContainerTest.java)
-
+- [GM/T 35275-2017 数字签名实现 GBT35275DSContainer](../../src/main/java/org/ofdrw/sign/signContainer/GBT35275DSContainer.java)
+  - [测试用例](../../src/test/java/org/ofdrw/sign/signContainer/GBT35275DSContainerTest.java)
+  - [测试用例（数科可验证）](../../src/test/java/org/ofdrw/sign/signContainer/GBT35275PKCS9DSContainerTest.java)
 
 ## 实现自定义的扩展数字签名容器
 
@@ -131,7 +134,15 @@ OFD R&W Sign模块中提供几个用于参考的验证容器实现，这些容�
 
 - [数字电子签名验证实现 DigitalValidateContainer](../../src/main/java/org/ofdrw/sign/verify/container/DigitalValidateContainer.java)
     - [测试用例](../../src/test/java/org/ofdrw/sign/verify/container/DigitalValidateContainerTest.java)
-- [GM/T 0031-2014 电子签章验证实现 SESV1Container](../../src/main/java/org/ofdrw/sign/verify/container/SESV1ValidateContainer.java)
+- [GM/T 0031-2014 电子签章验证实现 SESV1ValidateContainer](../../src/main/java/org/ofdrw/sign/verify/container/SESV1ValidateContainer.java)
     - [测试用例](../../src/test/java/org/ofdrw/sign/verify/container/SESV1ValidateContainerTest.java)
-- [GB/T 38540-2020 电子签章验证实现 SESV4Container](../../src/main/java/org/ofdrw/sign/verify/container/SESV4ValidateContainer.java)
+- [GB/T 38540-2020 电子签章验证实现 SESV4ValidateContainer](../../src/main/java/org/ofdrw/sign/verify/container/SESV4ValidateContainer.java)
     - [测试用例](../../src/test/java/org/ofdrw/sign/verify/container/SESV4ValidateContainerTest.java)
+- [GM/T 35275-2017 数字签名验证实现 GBT35275DSContainer](../../src/main/java/org/ofdrw/sign/verify/container/GBT35275ValidateContainer.java)
+  - [测试用例](../../src/test/java/org/ofdrw/sign/verify/container/GBT35275ValidateContainerTest.java)
+
+## 签章定位
+
+- [骑缝章](../../src/test/java/org/ofdrw/sign/stamppos/RidingStampPosTest.java)
+- [对开章](../../src/test/java/org/ofdrw/sign/stamppos/RidingStampPosTest.java)
+- [关键字定位签章](../../src/test/java/org/ofdrw/sign/keyword/KeywordPosSignTest.java)

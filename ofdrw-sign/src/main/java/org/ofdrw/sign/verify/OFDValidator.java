@@ -103,6 +103,9 @@ public class OFDValidator implements Closeable {
             rl.cd(signsListLoc.parent());
             // 获取签名记录列表
             List<org.ofdrw.core.signatures.Signature> signatures = sigList.getSignatures();
+            if (signatures == null || signatures.size() == 0) {
+                throw new DocNotSignException("文件未进行电子签名");
+            }
             for (org.ofdrw.core.signatures.Signature sigRecord : signatures) {
                 // 获取签章类型
                 SigType type = sigRecord.getType();
@@ -110,11 +113,12 @@ public class OFDValidator implements Closeable {
                 ST_Loc signFileLoc = sigRecord.getBaseLoc();
                 Path signatureFilePath = rl.getFile(signFileLoc);
                 Signature sig = rl.get(signFileLoc, Signature::new);
-                // 1. 检查文件完整性
-                checkFileIntegrity(sig);
                 rl.save();
                 try {
                     rl.cd(signFileLoc.parent());
+                    // 1. 检查文件完整性
+                    checkFileIntegrity(sig);
+
                     // 获取 SignedValue.dat 文件路径
                     Path signedValueFilePath = rl.getFile(sig.getSignedValue());
                     if (type == null || type == SigType.Seal) {
@@ -127,7 +131,10 @@ public class OFDValidator implements Closeable {
                             // 获取电子印章 Seal.esl 文件路径
                             Path sealFilePath = rl.getFile(seal.getBaseLoc());
                             // 2. 检查印章匹配
-                            checkSealMatch(sealFilePath, signedValueFilePath);
+                            boolean sealMatch = checkSealMatch(sealFilePath, signedValueFilePath);
+                            if (!sealMatch) {
+                                throw new GeneralSecurityException("印章(Seal.esl)与电子签章数据(SignedValue.dat)中的印章不匹配");
+                            }
                         }
                     }
                     // 签名算法名称
@@ -192,35 +199,31 @@ public class OFDValidator implements Closeable {
      */
     private void checkFileIntegrity(Signature sig)
             throws FileIntegrityException, NoSuchAlgorithmException, IOException {
-        rl.save();
-        try {
-            final SignedInfo signedInfo = sig.getSignedInfo();
-            final References references = signedInfo.getReferences();
-            final String checkMethod = references.getCheckMethod();
-            // 根据摘要算法名称获取摘要算法
-            MessageDigest md = MessageDigest.getInstance(checkMethod, provider);
-            for (Reference ref : references.getReferences()) {
-                ST_Loc fileRef = ref.getFileRef();
-                Path file = rl.getFile(fileRef);
-                // 获取预期的文件杂凑值
-                byte[] expectDataHash = ref.getCheckValue();
-                try (InputStream in = Files.newInputStream(file);
-                     DigestInputStream dis = new DigestInputStream(in, md)) {
-                    byte[] buffer = new byte[4096];
-                    // 根据缓存读入
-                    while (dis.read(buffer) > -1) ;
-                    // 计算最终文件杂凑值
-                    byte[] actualDataHash = md.digest();
-                    // 比对杂凑值是否一致
-                    if (!Arrays.equals(expectDataHash, actualDataHash)) {
-                        throw new FileIntegrityException(fileRef, expectDataHash, actualDataHash);
-                    }
+
+        final SignedInfo signedInfo = sig.getSignedInfo();
+        final References references = signedInfo.getReferences();
+        final String checkMethod = references.getCheckMethod();
+        // 根据摘要算法名称获取摘要算法
+        MessageDigest md = MessageDigest.getInstance(checkMethod, provider);
+        for (Reference ref : references.getReferences()) {
+            ST_Loc fileRef = ref.getFileRef();
+            Path file = rl.getFile(fileRef);
+            // 获取预期的文件杂凑值
+            byte[] expectDataHash = ref.getCheckValue();
+            try (InputStream in = Files.newInputStream(file);
+                 DigestInputStream dis = new DigestInputStream(in, md)) {
+                byte[] buffer = new byte[4096];
+                // 根据缓存读入
+                while (dis.read(buffer) > -1) ;
+                // 计算最终文件杂凑值
+                byte[] actualDataHash = md.digest();
+                // 比对杂凑值是否一致
+                if (!Arrays.equals(expectDataHash, actualDataHash)) {
+                    throw new FileIntegrityException(fileRef, expectDataHash, actualDataHash);
                 }
-                // 重置摘要算法
-                md.reset();
             }
-        } finally {
-            rl.restore();
+            // 重置摘要算法
+            md.reset();
         }
     }
 
@@ -242,6 +245,11 @@ public class OFDValidator implements Closeable {
         if (v.getVersion() == SESVersion.v4) {
             SES_Signature sesSignature = SES_Signature.getInstance(v.getObjSeq());
             SESeal eseal = sesSignature.getToSign().getEseal();
+            expect = eseal.getEncoded("DER");
+        } else if (v.getVersion() == SESVersion.v5) {
+            org.ofdrw.gm.ses.v5.SES_Signature sesSignature
+                    = org.ofdrw.gm.ses.v5.SES_Signature.getInstance(v.getObjSeq());
+            org.ofdrw.gm.ses.v5.SESeal eseal = sesSignature.getToSign().getEseal();
             expect = eseal.getEncoded("DER");
         } else if (v.getVersion() == SESVersion.v1) {
             org.ofdrw.gm.ses.v1.SES_Signature sesSignature

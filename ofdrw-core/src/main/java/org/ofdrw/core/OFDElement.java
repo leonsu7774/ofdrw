@@ -3,7 +3,6 @@ package org.ofdrw.core;
 import org.dom4j.Attribute;
 import org.dom4j.Element;
 import org.dom4j.QName;
-import org.ofdrw.core.basicStructure.ofd.OFD;
 import org.ofdrw.core.basicType.ST_ID;
 
 import java.io.Serializable;
@@ -27,18 +26,17 @@ import java.util.stream.Collectors;
  */
 public class OFDElement extends DefaultElementProxy {
 
+    /**
+     * 命名空间严格模式
+     * <p>
+     * true - 严格使用OFD空间获取OFD元素
+     * <p>
+     * false - 只要元素名称相同则认为是OFD元素（默认值）
+     */
+    public static boolean NSStrictMode = false;
+
     public OFDElement(Element proxy) {
         super(proxy);
-//        /*
-//         * 判断 被代理的对象和子类的对象是否为同一个类型
-//         */
-//        String subObjsQName = this.getQualifiedName();
-//        String proxyObjQName = this.proxy.getQualifiedName();
-//        if (!subObjsQName.equals(proxyObjQName)) {
-//            throw new IllegalArgumentException("wrong proxy type: "
-//                    + this.proxy.getQualifiedName()
-//                    + " require: " + this.getQualifiedName());
-//        }
     }
 
     protected OFDElement(String name) {
@@ -71,18 +69,13 @@ public class OFDElement extends DefaultElementProxy {
      * <p>
      * 如果参数已经存在则修改参数
      * <p>
-     * 如果属性值value为null，表示删除该类元素
+     * 如果需要删除元素，请使用 {@link #removeOFDElemByNames}
      *
      * @param name  元素名称
      * @param value 元素文本
      * @return this
      */
     public OFDElement setOFDEntity(String name, Serializable value) {
-        if (value == null) {
-            this.removeOFDElemByNames(name);
-            return this;
-        }
-
         Element e = this.getOFDElement(name);
         if (e == null) {
             return addOFDEntity(name, value);
@@ -105,15 +98,21 @@ public class OFDElement extends DefaultElementProxy {
 
     /**
      * 获取OFD的元素
+     * <p>
+     * 若无法在OFD命名空间下获取同名元素，则尝试从默认命名空间获取。
      *
      * @param name OFD元素名称
      * @return OFD元素或null
      */
     public Element getOFDElement(String name) {
-//        return this.element(new QName(name, Const.OFD_NAMESPACE));
-        return this.element(new OFDCommonQName(name));
+        Element res;
+        if (NSStrictMode) {
+            res = this.element(new OFDCommonQName(name));
+        } else {
+            res = this.element(name);
+        }
+        return res;
     }
-
 
 
     /**
@@ -161,6 +160,8 @@ public class OFDElement extends DefaultElementProxy {
      * 获取 指定名称OFD元素集合
      * <p>
      * 集合将会保持原有次序
+     * <p>
+     * 若容器内的元素非OFD命名空间，但是名字相同也会被取到
      *
      * @param name   OFD元素名称
      * @param mapper 转换对象构造器引用
@@ -168,13 +169,40 @@ public class OFDElement extends DefaultElementProxy {
      * @return 指定名称OFD元素集合
      */
     public <R> List<R> getOFDElements(String name, Function<? super Element, ? extends R> mapper) {
-        List<Element> elements = this.elements(new OFDCommonQName(name));
+        List<Element> c;
+
+        if (NSStrictMode) {
+            c = this.elements(new OFDCommonQName(name));
+        } else {
+            c = this.elements(name);
+        }
+
+        if (c == null || c.isEmpty()) {
+            return Collections.emptyList();
+        }
+        return c.stream().map(mapper).collect(Collectors.toList());
+    }
+
+
+    /**
+     * 获取 指定名称OFD元素集合
+     * <p>
+     * 集合将会保持原有次序
+     * qname匹配的时候不再验证namespace，兼容namespace为空的情况。
+     *
+     * @param name   OFD元素名称
+     * @param mapper 转换对象构造器引用
+     * @param <R>    指定元素对象
+     * @return 指定名称OFD元素集合
+     * @deprecated {@link #getOFDElements}已经兼容非标准命名空间
+     */
+    @Deprecated
+    public <R> List<R> getElements(String name, Function<? super Element, ? extends R> mapper) {
+        List<Element> elements = this.elements(new QName(name));
         if (elements == null || elements.isEmpty()) {
             return Collections.emptyList();
         }
-        return elements.stream()
-                .map(mapper)
-                .collect(Collectors.toList());
+        return elements.stream().map(mapper).collect(Collectors.toList());
     }
 
     /**
@@ -248,6 +276,18 @@ public class OFDElement extends DefaultElementProxy {
         return this.setObjID(new ST_ID(objId));
     }
 
+    /**
+     * 【可选】
+     * <p>
+     * 设置 OFD对象标识，无符号整数，应在文档内唯一。
+     *
+     * @param id OFD对象标识，请确保id为数字字符串
+     * @return this
+     */
+    public OFDElement setObjID(String id) {
+        this.addAttribute("ID", id);
+        return this;
+    }
 
     /**
      * 移除元素中所有内容

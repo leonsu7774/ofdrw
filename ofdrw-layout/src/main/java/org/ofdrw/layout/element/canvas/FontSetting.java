@@ -1,7 +1,11 @@
 package org.ofdrw.layout.element.canvas;
 
+import org.ofdrw.font.EnvFont;
 import org.ofdrw.font.Font;
+import org.ofdrw.font.FontName;
 import org.ofdrw.layout.element.TextFontInfo;
+
+import java.awt.geom.Rectangle2D;
 
 /**
  * 字体设置
@@ -46,6 +50,8 @@ public class FontSetting implements Cloneable, TextFontInfo {
      * 字符方向
      * <p>
      * 指定了文字放置的方式（基线方向）
+     * <p>
+     * 允许值：0、90、180、270
      */
     private int charDirection = 0;
 
@@ -53,6 +59,8 @@ public class FontSetting implements Cloneable, TextFontInfo {
      * 阅读方向
      * <p>
      * 指定了文字排列的方向
+     * <p>
+     * 允许值：0、90、180、270
      */
     private int readDirection = 0;
 
@@ -61,9 +69,43 @@ public class FontSetting implements Cloneable, TextFontInfo {
      */
     private TextAlign textAlign = TextAlign.start;
 
+    /**
+     * 不同字号的字体每次都需要重新加载AWT字体对象
+     * <p>
+     * 缓存对象不clone
+     */
+    private java.awt.Font awtFont;
+
+    /**
+     * 简化构造提供默认的字体配置
+     * <p>
+     * 字体类型为宋体
+     *
+     * @return 字体配置
+     */
+    public static FontSetting getInstance() {
+        return new FontSetting(5, FontName.SimSun.font());
+    }
+
+    /**
+     * 简化构造提供可选的字体配置
+     * <p>
+     * 字体类型为宋体
+     *
+     * @param fontSize 字体大小，单位：毫米（mm）
+     * @return 字体配置
+     */
+    public static FontSetting getInstance(double fontSize) {
+        return new FontSetting(fontSize, FontName.SimSun.font());
+    }
+
     public FontSetting(double fontSize, Font fontObj) {
+        if (fontObj == null) {
+            throw new IllegalArgumentException("字体对象(fontObj)为空");
+        }
         this.fontObj = fontObj;
         this.fontSize = fontSize;
+        this.awtFont = null;
     }
 
     private FontSetting() {
@@ -109,7 +151,11 @@ public class FontSetting implements Cloneable, TextFontInfo {
      * @return this
      */
     public FontSetting setFont(Font fontObj) {
+        if (fontObj == null) {
+            throw new IllegalArgumentException("字体对象(fontObj)为空");
+        }
         this.fontObj = fontObj;
+        this.awtFont = null;
         return this;
     }
 
@@ -132,6 +178,7 @@ public class FontSetting implements Cloneable, TextFontInfo {
      */
     public FontSetting setFontSize(double fontSize) {
         this.fontSize = fontSize;
+        this.awtFont = null;
         return this;
     }
 
@@ -283,7 +330,35 @@ public class FontSetting implements Cloneable, TextFontInfo {
      * @return 宽度单位毫米
      */
     public Double charWidth(char c) {
-        return fontObj.getCharWidthScale(c) * fontSize;
+        return box(c).getWidth();
+    }
+
+    /**
+     * 返回文字所占空间
+     *
+     * @param c 文字
+     * @return 文字所占空间
+     */
+    public Rectangle2D box(char c) {
+        if (fontObj.hasWidthMath()) {
+            // 如果存在预设的字符映射表那么查表计算
+            return new Rectangle2D.Double(0, 0, fontObj.getCharWidthScale(c) * fontSize, fontSize);
+        }
+        // 如果字体缓存为空，则加载字体
+        if (awtFont == null) {
+            // 尝试从字体中获取AWT字体对象
+            awtFont = fontObj.getFontObj();
+            if (awtFont == null) {
+                // 尝试从环境变量中加载字体
+                awtFont = EnvFont.getFont(fontObj.getName(), fontObj.getFamilyName());
+            }
+            if (awtFont == null) {
+                awtFont = EnvFont.getDefaultFont();
+            }
+            awtFont = awtFont.deriveFont((float) fontSize);
+        }
+
+        return awtFont.getStringBounds(String.valueOf(c), EnvFont.FRCtx());
     }
 
 
